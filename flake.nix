@@ -18,16 +18,16 @@
         # Build configuration
         version = shortRev;
         buildTime = "1970-01-01T00:00:00Z";
+
+        # Update this hash after running: nix build . --no-link 2>&1 | grep 'got:' | cut -d: -f2 | xargs
+        vendorHash = "sha256-+4bH5wmy1PoIK+RXXd9lFDqTHXbpMmoOM9QLilg0oWQ=";
         
         # Build all cc-tools binaries
         cc-tools-validate = pkgs.buildGoModule rec {
           pname = "cc-tools-validate";
-          inherit version;
+          inherit version vendorHash;
           
           src = ./.;
-          
-          # Update this hash after running: nix build . --no-link 2>&1 | grep 'got:' | cut -d: -f2 | xargs
-          vendorHash = "sha256-qbzor2DVDqLCuNqAWNxgr8xHCljrQEm+fRh8iH5tmKc=";
           
           subPackages = [ "cmd/cc-tools-validate" ];
           
@@ -49,11 +49,9 @@
 
         cc-tools-main = pkgs.buildGoModule rec {
           pname = "cc-tools";
-          inherit version;
+          inherit version vendorHash;
           
           src = ./.;
-          
-          vendorHash = "sha256-qbzor2DVDqLCuNqAWNxgr8xHCljrQEm+fRh8iH5tmKc=";
           
           subPackages = [ "cmd/cc-tools" ];
           
@@ -75,11 +73,9 @@
 
         cc-tools-statusline = pkgs.buildGoModule rec {
           pname = "cc-tools-statusline";
-          inherit version;
+          inherit version vendorHash;
           
           src = ./.;
-          
-          vendorHash = "sha256-qbzor2DVDqLCuNqAWNxgr8xHCljrQEm+fRh8iH5tmKc=";
           
           subPackages = [ "cmd/cc-tools-statusline" ];
           
