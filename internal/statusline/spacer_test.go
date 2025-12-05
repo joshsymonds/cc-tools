@@ -20,17 +20,17 @@ func TestConfigurableSpacers(t *testing.T) {
 			ModelDisplay:  "Claude",
 			CurrentDir:    "/home/user",
 			TermWidth:     100,
-			ContextLength: 50000, // Not in compact mode
+			ContextLength: 50000,
 		}
 
 		result := s.Render(data)
 		stripped := stripAnsi(result)
 		width := runewidth.StringWidth(stripped)
 
-		// Default config has 2 char left + 4 char right = 6 chars total spacers
-		// So the output should be termWidth - 6 = 94 chars wide
-		if width != 94 {
-			t.Errorf("With default spacers (2+4), width should be 94, got %d", width)
+		// Default config has 2 char left + 40 char right = 42 chars total spacers
+		// So the output should be termWidth - 42 = 58 chars wide
+		if width != 58 {
+			t.Errorf("With default spacers (2+40), width should be 58, got %d", width)
 		}
 	})
 
@@ -44,7 +44,7 @@ func TestConfigurableSpacers(t *testing.T) {
 			ModelDisplay:  "Claude",
 			CurrentDir:    "/home/user",
 			TermWidth:     100,
-			ContextLength: 50000, // Not in compact mode
+			ContextLength: 50000,
 		}
 
 		result := s.Render(data)
@@ -55,30 +55,6 @@ func TestConfigurableSpacers(t *testing.T) {
 		// So the output should be termWidth - 5 = 95 chars wide
 		if width != 95 {
 			t.Errorf("With custom spacers (3+2), width should be 95, got %d", width)
-		}
-	})
-
-	t.Run("compact mode sets right spacer to 40", func(t *testing.T) {
-		config := &Config{
-			LeftSpacerWidth:  2,
-			RightSpacerWidth: 5, // This should be ignored in compact mode
-		}
-		s := NewWithConfig(deps, config)
-		data := &CachedData{
-			ModelDisplay:  "Claude",
-			CurrentDir:    "/home/user",
-			TermWidth:     100,
-			ContextLength: 170000, // In compact mode (>= 85% of 200k = 170k)
-		}
-
-		result := s.Render(data)
-		stripped := stripAnsi(result)
-		width := runewidth.StringWidth(stripped)
-
-		// In compact mode: left spacer (2) + right spacer (40)
-		// So the output should be termWidth - 42 = 58 chars wide
-		if width != 58 {
-			t.Errorf("In compact mode with 40-char right spacer, width should be 58, got %d", width)
 		}
 	})
 

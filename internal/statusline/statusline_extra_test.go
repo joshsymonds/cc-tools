@@ -332,18 +332,18 @@ func TestStatusline_GetTokenMetrics_InvalidJSON(t *testing.T) {
 		},
 		{
 			name: "mixed valid and invalid",
-			content: `{"message": {"usage": {"input_tokens": 100, "output_tokens": 50}}}
+			content: `{"message": {"usage": {"input_tokens": 100, "output_tokens": 50}}, "timestamp": "2025-01-01T10:00:00Z"}
 invalid line
-{"message": {"usage": {"input_tokens": 200, "output_tokens": 100}}}`,
+{"message": {"usage": {"input_tokens": 200, "output_tokens": 100}}, "timestamp": "2025-01-01T10:01:00Z"}`,
 			expected: TokenMetrics{
 				InputTokens:   300,
 				OutputTokens:  150,
-				ContextLength: 200, // Last main chain entry's input_tokens only
+				ContextLength: 200, // Most recent by timestamp: input_tokens only
 			},
 		},
 		{
 			name:    "with cache tokens",
-			content: `{"message": {"usage": {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 25}}}`,
+			content: `{"message": {"usage": {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 25}}, "timestamp": "2025-01-01T10:00:00Z"}`,
 			expected: TokenMetrics{
 				InputTokens:   100,
 				OutputTokens:  50,
@@ -353,14 +353,14 @@ invalid line
 		},
 		{
 			name: "with sidechain entries",
-			content: `{"message": {"usage": {"input_tokens": 100, "output_tokens": 50}}}
-{"message": {"usage": {"input_tokens": 200, "output_tokens": 100}}, "isSidechain": true}
-{"message": {"usage": {"input_tokens": 300, "output_tokens": 150, "cache_read_input_tokens": 50, "cache_creation_input_tokens": 25}}}`,
+			content: `{"message": {"usage": {"input_tokens": 100, "output_tokens": 50}}, "timestamp": "2025-01-01T10:00:00Z"}
+{"message": {"usage": {"input_tokens": 200, "output_tokens": 100}}, "isSidechain": true, "timestamp": "2025-01-01T10:01:00Z"}
+{"message": {"usage": {"input_tokens": 300, "output_tokens": 150, "cache_read_input_tokens": 50, "cache_creation_input_tokens": 25}}, "timestamp": "2025-01-01T10:02:00Z"}`,
 			expected: TokenMetrics{
 				InputTokens:   600, // All entries count for totals
 				OutputTokens:  300,
-				CachedTokens:  50,
-				ContextLength: 375, // Last main chain: 300 + 50 + 25
+				CachedTokens:  75,  // cache_read (50) + cache_creation (25) from last entry
+				ContextLength: 375, // Most recent main chain: 300 + 50 + 25
 			},
 		},
 	}

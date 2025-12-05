@@ -57,7 +57,12 @@ func TestContextBarPadding(t *testing.T) {
 	})
 
 	t.Run("context bar content shrinks with padding", func(t *testing.T) {
-		s := CreateStatusline(deps)
+		// Use custom config with smaller spacers for this test
+		config := &Config{
+			LeftSpacerWidth:  2,
+			RightSpacerWidth: 4,
+		}
+		s := NewWithConfig(deps, config)
 
 		// Test with different widths to see how the bar adapts
 		testCases := []struct {
@@ -99,9 +104,9 @@ func TestContextBarPadding(t *testing.T) {
 				result := s.Render(data)
 				stripped := stripAnsi(result)
 
-				// Total width should match terminal width minus spacers (default: 2+4=6)
+				// Total width should match terminal width minus spacers (2+4=6)
 				width := runewidth.StringWidth(stripped)
-				expectedWidth := tc.termWidth - 6 // Default spacers
+				expectedWidth := tc.termWidth - 6
 				if width != expectedWidth {
 					t.Errorf("Width mismatch: got %d, want %d", width, expectedWidth)
 				}
@@ -116,7 +121,12 @@ func TestContextBarPadding(t *testing.T) {
 	})
 
 	t.Run("context bar respects minimum size with padding", func(t *testing.T) {
-		s := CreateStatusline(deps)
+		// Use custom config with smaller spacers for this test
+		config := &Config{
+			LeftSpacerWidth:  2,
+			RightSpacerWidth: 4,
+		}
+		s := NewWithConfig(deps, config)
 
 		// Very narrow terminal where context bar won't fit with padding
 		deps.TerminalWidth = &MockTerminalWidth{width: 50}
@@ -130,9 +140,9 @@ func TestContextBarPadding(t *testing.T) {
 		result := s.Render(data)
 		stripped := stripAnsi(result)
 
-		// Should maintain width minus spacers (default: 2+4=6)
+		// Should maintain width minus spacers (2+4=6)
 		width := runewidth.StringWidth(stripped)
-		expectedWidth := 50 - 6 // Default spacers
+		expectedWidth := 50 - 6
 		if width != expectedWidth {
 			t.Errorf("Width should be maintained: got %d, want %d", width, expectedWidth)
 		}
@@ -161,7 +171,7 @@ func TestContextBarPadding(t *testing.T) {
 		barWidth := 60
 		contextLength := 50000
 
-		result := s.createContextBar(contextLength, barWidth)
+		result := s.createContextBar(contextLength, "", barWidth)
 
 		// The result should be exactly barWidth characters
 		stripped := stripAnsi(result)

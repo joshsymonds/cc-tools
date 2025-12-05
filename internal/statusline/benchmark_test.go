@@ -116,7 +116,7 @@ func TestStatuslineRenderTiming(t *testing.T) {
 			termWidth:     120,
 		},
 		{
-			name:          "compact mode",
+			name:          "high context",
 			contextLength: 170000,
 			hasGit:        true,
 			hasK8s:        true,

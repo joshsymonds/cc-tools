@@ -151,7 +151,7 @@ func TestStatuslineGenerate(t *testing.T) {
 			},
 		},
 		{
-			name: "statusline with tokens",
+			name: "statusline with context percentage",
 			input: `{
 				"model": {"display_name": "Claude"},
 				"workspace": {"project_dir": "/home/user/project"},
@@ -162,14 +162,14 @@ func TestStatuslineGenerate(t *testing.T) {
 					envReader.vars["HOME"] = "/home/user"
 				}
 				fr, _ := deps.FileReader.(*MockFileReader)
-				// Add transcript with token usage
+				// Add transcript with token usage (context bar shows percentage)
+				// Timestamp is required for context length calculation
 				fr.files["/tmp/transcript.jsonl"] = []byte(
-					`{"message": {"usage": {"input_tokens": 1500, "output_tokens": 300}}}`,
+					`{"message": {"usage": {"input_tokens": 1500, "output_tokens": 300}}, "timestamp": "2025-01-01T10:00:00Z"}`,
 				)
 			},
 			contains: []string{
-				"↑1.5k", // Input tokens
-				"↓300",  // Output tokens
+				"Context", // Context bar should be visible
 			},
 		},
 		{
@@ -336,22 +336,22 @@ func TestContextBar(t *testing.T) {
 		shouldContain []string
 	}{
 		{
-			contextLength: 32000, // 20% - green
+			contextLength: 40000, // 20% of 200k - green
 			barWidth:      50,
 			shouldContain: []string{"20.0%", "Context"},
 		},
 		{
-			contextLength: 80000, // 50% - yellow
+			contextLength: 100000, // 50% of 200k - yellow
 			barWidth:      50,
 			shouldContain: []string{"50.0%", "Context"},
 		},
 		{
-			contextLength: 120000, // 75% - peach
+			contextLength: 150000, // 75% of 200k - peach
 			barWidth:      50,
 			shouldContain: []string{"75.0%", "Context"},
 		},
 		{
-			contextLength: 160000, // 100% - red
+			contextLength: 200000, // 100% of 200k - red
 			barWidth:      50,
 			shouldContain: []string{"100.0%", "Context"},
 		},
@@ -359,7 +359,7 @@ func TestContextBar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.shouldContain[0], func(t *testing.T) {
-			result := sl.createContextBar(tt.contextLength, tt.barWidth)
+			result := sl.createContextBar(tt.contextLength, "", tt.barWidth)
 
 			for _, expected := range tt.shouldContain {
 				if !strings.Contains(result, expected) {

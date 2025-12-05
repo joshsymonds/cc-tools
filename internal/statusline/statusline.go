@@ -48,6 +48,7 @@ type TokenMetrics struct {
 
 // CachedData represents cached statusline data.
 type CachedData struct {
+	ModelID        string
 	ModelDisplay   string
 	CurrentDir     string
 	TranscriptPath string
@@ -61,6 +62,37 @@ type CachedData struct {
 	Devspace       string
 	DevspaceSymbol string
 	TermWidth      int
+}
+
+// ContextConfig holds model-specific context window configuration.
+type ContextConfig struct {
+	MaxTokens    int
+	UsableTokens int
+}
+
+// getContextConfig returns the context window configuration for a model.
+// Sonnet 4.5 with [1m] suffix has 1M context, others have 200k.
+func getContextConfig(modelID string) ContextConfig {
+	// Default for older models
+	defaultConfig := ContextConfig{
+		MaxTokens:    200000,
+		UsableTokens: 160000,
+	}
+
+	if modelID == "" {
+		return defaultConfig
+	}
+
+	// Sonnet 4.5 variants with 1M context (requires [1m] suffix for long context beta)
+	if strings.Contains(modelID, "claude-sonnet-4-5") &&
+		strings.Contains(strings.ToLower(modelID), "[1m]") {
+		return ContextConfig{
+			MaxTokens:    1000000,
+			UsableTokens: 800000, // 80% of 1M
+		}
+	}
+
+	return defaultConfig
 }
 
 // Dependencies contains all external dependencies.
@@ -99,7 +131,7 @@ type TerminalWidth interface {
 type Config struct {
 	// LeftSpacerWidth is the width of the left spacer (default: 2)
 	LeftSpacerWidth int
-	// RightSpacerWidth is the width of the right spacer (default: 2, only shown when not in compact mode)
+	// RightSpacerWidth is the width reserved for Claude Code's UI on the right
 	RightSpacerWidth int
 }
 
@@ -107,7 +139,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	const (
 		defaultLeftSpacerWidth  = 2
-		defaultRightSpacerWidth = 4
+		defaultRightSpacerWidth = 40 // Reserve space for Claude Code's right-side UI
 	)
 	return &Config{
 		LeftSpacerWidth:  defaultLeftSpacerWidth,
@@ -184,6 +216,7 @@ func (s *Statusline) computeData(currentDir string) *CachedData {
 		CurrentDir:     currentDir,
 		TranscriptPath: s.input.TranscriptPath,
 		TermWidth:      s.deps.TerminalWidth.GetWidth(),
+		ModelID:        s.input.Model.ID,
 	}
 
 	// Model display name
@@ -348,6 +381,7 @@ func (s *Statusline) getTokenMetrics(transcriptPath string) TokenMetrics {
 		CacheReadInputTokens     int
 		CacheCreationInputTokens int
 	}
+	var mostRecentTimestamp time.Time
 
 	for _, line := range lines {
 		if line == "" {
@@ -363,7 +397,9 @@ func (s *Statusline) getTokenMetrics(transcriptPath string) TokenMetrics {
 					CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 				} `json:"usage"`
 			} `json:"message"`
-			IsSidechain bool `json:"isSidechain"`
+			IsSidechain       bool   `json:"isSidechain"`
+			IsApiErrorMessage bool   `json:"isApiErrorMessage"`
+			Timestamp         string `json:"timestamp"`
 		}
 
 		unmarshalErr := json.Unmarshal([]byte(line), &msg)
@@ -371,13 +407,20 @@ func (s *Statusline) getTokenMetrics(transcriptPath string) TokenMetrics {
 			// Accumulate totals for all messages
 			metrics.InputTokens += msg.Message.Usage.InputTokens
 			metrics.OutputTokens += msg.Message.Usage.OutputTokens
+			// Include both cache_read and cache_creation in cached tokens
 			metrics.CachedTokens += msg.Message.Usage.CacheReadInputTokens
+			metrics.CachedTokens += msg.Message.Usage.CacheCreationInputTokens
 
-			// Track the most recent main chain entry (not sidechain) for context length
-			if !msg.IsSidechain {
-				mostRecentMainChainUsage.InputTokens = msg.Message.Usage.InputTokens
-				mostRecentMainChainUsage.CacheReadInputTokens = msg.Message.Usage.CacheReadInputTokens
-				mostRecentMainChainUsage.CacheCreationInputTokens = msg.Message.Usage.CacheCreationInputTokens
+			// Track the most recent main chain entry (not sidechain, not API error) for context length
+			// Use timestamp to find truly most recent entry
+			if !msg.IsSidechain && !msg.IsApiErrorMessage && msg.Timestamp != "" {
+				entryTime, parseErr := time.Parse(time.RFC3339, msg.Timestamp)
+				if parseErr == nil && entryTime.After(mostRecentTimestamp) {
+					mostRecentTimestamp = entryTime
+					mostRecentMainChainUsage.InputTokens = msg.Message.Usage.InputTokens
+					mostRecentMainChainUsage.CacheReadInputTokens = msg.Message.Usage.CacheReadInputTokens
+					mostRecentMainChainUsage.CacheCreationInputTokens = msg.Message.Usage.CacheCreationInputTokens
+				}
 			}
 		}
 	}

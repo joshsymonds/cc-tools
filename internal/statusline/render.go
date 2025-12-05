@@ -9,31 +9,23 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-const (
-	// Context window constants.
-	autoCompactThreshold    = 160000 // Tokens at which auto-compact triggers
-	compactThresholdPercent = 85     // Percentage of usable window to trigger compact mode
-)
-
 // Render renders the statusline with lipgloss styling and guaranteed fixed width.
 func (s *Statusline) Render(data *CachedData) string {
 	termWidth := s.getTermWidth(data)
 	s.colors = CatppuccinMocha{}
 	modelIcon := s.selectModelIcon()
 	dirPath := formatPath(data.CurrentDir)
-	isCompact := s.isCompactMode(data.ContextLength)
 
 	// Calculate widths
-	leftSpacerWidth, rightSpacerWidth, contentWidth := s.calculateWidths(termWidth, isCompact)
+	leftSpacerWidth, rightSpacerWidth, contentWidth := s.calculateWidths(termWidth)
 	effectiveWidth := termWidth - leftSpacerWidth - rightSpacerWidth
 
 	// Debug terminal width
 	if os.Getenv("DEBUG_WIDTH") == "1" {
 		fmt.Fprintf(
 			os.Stderr,
-			"Render: termWidth=%d, isCompact=%v, effectiveWidth=%d, spacers(L:%d,R:%d), contentWidth=%d\n",
+			"Render: termWidth=%d, effectiveWidth=%d, spacers(L:%d,R:%d), contentWidth=%d\n",
 			data.TermWidth,
-			isCompact,
 			effectiveWidth,
 			leftSpacerWidth,
 			rightSpacerWidth,
@@ -42,8 +34,8 @@ func (s *Statusline) Render(data *CachedData) string {
 	}
 
 	// Build components with proper sizing that accounts for spacers
-	leftSection := s.buildLeftSection(dirPath, data.ModelDisplay, modelIcon, data, isCompact, contentWidth)
-	rightSection := s.buildRightSection(data, isCompact, contentWidth)
+	leftSection := s.buildLeftSection(dirPath, data.ModelDisplay, modelIcon, data, contentWidth)
+	rightSection := s.buildRightSection(data, contentWidth)
 
 	// Spacers are width constraints, not visible spaces
 	// Calculate actual widths (stripping ANSI) without adding spacer widths
@@ -63,7 +55,7 @@ func (s *Statusline) Render(data *CachedData) string {
 	}
 
 	// Create middle section (context bar or spacing)
-	middleSection := s.buildMiddleSection(data, middleWidth, isCompact)
+	middleSection := s.buildMiddleSection(data, middleWidth)
 
 	// Combine all sections (spacers are width constraints, not visible spaces)
 	// Start with a color reset to ensure clean state regardless of what Claude Code has done
@@ -102,24 +94,13 @@ func (s *Statusline) Render(data *CachedData) string {
 func (s *Statusline) buildLeftSection(
 	dirPath, modelDisplay, modelIcon string,
 	data *CachedData,
-	isCompact bool,
 	availableWidth int,
 ) string {
 	// Calculate proportional truncation lengths based on available width
 	// Default allocations when width is sufficient
-	var dirMaxLen, modelMaxLen int
-
-	// Base minimum sizes
 	minDirLen := 10
 	minModelLen := 10
-
-	if isCompact {
-		// In compact mode, use tighter defaults
-		dirMaxLen, modelMaxLen = 25, 30
-	} else {
-		// Normal mode defaults - increased since components get priority
-		dirMaxLen, modelMaxLen = 40, 40
-	}
+	dirMaxLen, modelMaxLen := 40, 40
 
 	// If available width is very constrained, scale down proportionally
 	// Reserve space for: curves(2) + chevrons(2) + spaces(6) + icon(2) + tokens(~10) = ~22 chars overhead
@@ -167,14 +148,6 @@ func (s *Statusline) buildLeftSection(
 	sb.WriteString(modelIcon)
 	sb.WriteString(" ")
 	sb.WriteString(modelDisplay)
-
-	// Add tokens if present
-	if data.InputTokens > 0 || data.OutputTokens > 0 {
-		sb.WriteString(fmt.Sprintf(" ↑%s ↓%s",
-			formatTokens(data.InputTokens),
-			formatTokens(data.OutputTokens)))
-	}
-
 	sb.WriteString(" ")
 	sb.WriteString(s.colors.NC())
 
@@ -186,8 +159,8 @@ func (s *Statusline) buildLeftSection(
 	return sb.String()
 }
 
-func (s *Statusline) buildRightSection(data *CachedData, isCompact bool, availableWidth int) string {
-	maxLengths := s.getRightSectionMaxLengths(isCompact)
+func (s *Statusline) buildRightSection(data *CachedData, availableWidth int) string {
+	maxLengths := s.getRightSectionMaxLengths()
 	awsProfile := s.deps.EnvReader.Get("AWS_PROFILE")
 	componentCount := s.countRightComponents(data, awsProfile)
 
@@ -207,35 +180,21 @@ type componentMaxLengths struct {
 	devspace int
 }
 
-func (s *Statusline) getRightSectionMaxLengths(isCompact bool) componentMaxLengths {
+func (s *Statusline) getRightSectionMaxLengths() componentMaxLengths {
 	const (
-		compactHostname = 20
-		compactBranch   = 25
-		compactAWS      = 20
-		compactK8s      = 20
-		compactDevspace = 15
-		normalHostname  = 35
-		normalBranch    = 40
-		normalAWS       = 35
-		normalK8s       = 35
-		normalDevspace  = 30
+		maxHostname = 20
+		maxBranch   = 25
+		maxAWS      = 20
+		maxK8s      = 20
+		maxDevspace = 15
 	)
 
-	if isCompact {
-		return componentMaxLengths{
-			hostname: compactHostname,
-			branch:   compactBranch,
-			aws:      compactAWS,
-			k8s:      compactK8s,
-			devspace: compactDevspace,
-		}
-	}
 	return componentMaxLengths{
-		hostname: normalHostname,
-		branch:   normalBranch,
-		aws:      normalAWS,
-		k8s:      normalK8s,
-		devspace: normalDevspace,
+		hostname: maxHostname,
+		branch:   maxBranch,
+		aws:      maxAWS,
+		k8s:      maxK8s,
+		devspace: maxDevspace,
 	}
 }
 
@@ -387,7 +346,7 @@ func (s *Statusline) renderComponentContent(sb *strings.Builder, comp Component)
 	sb.WriteString(s.colors.NC())
 }
 
-func (s *Statusline) buildMiddleSection(data *CachedData, width int, _ bool) string { // isCompact unused
+func (s *Statusline) buildMiddleSection(data *CachedData, width int) string {
 	if width <= 0 {
 		return ""
 	}
@@ -396,21 +355,21 @@ func (s *Statusline) buildMiddleSection(data *CachedData, width int, _ bool) str
 	// This ensures components get priority for space
 	const minContextBarWidth = 25
 	if data.ContextLength > 0 && width >= minContextBarWidth {
-		return s.createContextBar(data.ContextLength, width)
+		return s.createContextBar(data.ContextLength, data.ModelID, width)
 	}
 
 	// Otherwise just spaces
 	return strings.Repeat(" ", width)
 }
 
-func (s *Statusline) createContextBar(contextLength, barWidth int) string {
+func (s *Statusline) createContextBar(contextLength int, modelID string, barWidth int) string {
 	availableForBar := s.calculateAvailableBarWidth(barWidth)
 	const minSensibleBarSize = 15
 	if availableForBar < minSensibleBarSize {
 		return strings.Repeat(" ", barWidth)
 	}
 
-	percentage := s.calculateContextPercentage(contextLength)
+	percentage := s.calculateContextPercentage(contextLength, modelID)
 	bgColor, fgColor, fgLightBg := s.getContextColors(percentage)
 
 	barInfo := s.prepareContextBarInfo(percentage, availableForBar)
@@ -688,25 +647,14 @@ func (s *Statusline) selectModelIcon() string {
 	return string(icons[rand.IntN(len(icons))]) //nolint:gosec // Non-cryptographic randomness is fine for UI
 }
 
-func (s *Statusline) isCompactMode(contextLength int) bool {
-	const percentDivisor = 100
-	compactModeThreshold := (autoCompactThreshold * compactThresholdPercent) / percentDivisor
-	return contextLength >= compactModeThreshold
-}
-
-func (s *Statusline) calculateWidths(termWidth int, isCompact bool) (int, int, int) {
+func (s *Statusline) calculateWidths(termWidth int) (int, int, int) {
 	leftSpacer := 0
 	if s.config.LeftSpacerWidth > 0 {
 		leftSpacer = s.config.LeftSpacerWidth
 	}
 
-	rightSpacer := 0
-	if isCompact {
-		// In compact mode, reserve 40 chars for auto-compact message
-		rightSpacer = 40
-	} else if s.config.RightSpacerWidth > 0 {
-		rightSpacer = s.config.RightSpacerWidth
-	}
+	// Always reserve space for Claude Code's UI on the right
+	rightSpacer := s.config.RightSpacerWidth
 
 	effectiveWidth := termWidth - leftSpacer - rightSpacer
 	content := effectiveWidth
@@ -735,9 +683,10 @@ func (s *Statusline) calculateAvailableBarWidth(barWidth int) int {
 	return barWidth - (contextBarPadding * paddingMultiplier)
 }
 
-func (s *Statusline) calculateContextPercentage(contextLength int) float64 {
+func (s *Statusline) calculateContextPercentage(contextLength int, modelID string) float64 {
 	const maxPercentage = 100.0
-	percentage := float64(contextLength) * maxPercentage / float64(autoCompactThreshold)
+	contextConfig := getContextConfig(modelID)
+	percentage := float64(contextLength) * maxPercentage / float64(contextConfig.MaxTokens)
 	if percentage > maxPercentage {
 		return maxPercentage
 	}
