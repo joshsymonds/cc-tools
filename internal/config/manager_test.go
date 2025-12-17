@@ -71,8 +71,8 @@ func TestEnsureConfig(t *testing.T) {
 				if m.config == nil {
 					t.Fatal("config should be loaded")
 				}
-				if m.config.Validate.Timeout != defaultValidateTimeout {
-					t.Errorf("timeout = %d, want %d", m.config.Validate.Timeout, defaultValidateTimeout)
+				if m.config.Statusline.CacheSeconds != defaultStatuslineCacheSeconds {
+					t.Errorf("cache_seconds = %d, want %d", m.config.Statusline.CacheSeconds, defaultStatuslineCacheSeconds)
 				}
 			},
 		},
@@ -81,10 +81,6 @@ func TestEnsureConfig(t *testing.T) {
 			setupFunc: func(t *testing.T, configPath string) {
 				os.MkdirAll(filepath.Dir(configPath), 0755)
 				config := &ConfigValues{
-					Validate: ValidateConfigValues{
-						Timeout:  120,
-						Cooldown: 10,
-					},
 					Statusline: StatuslineConfigValues{
 						Workspace:    "test-workspace",
 						CacheDir:     "/tmp/cache",
@@ -98,9 +94,6 @@ func TestEnsureConfig(t *testing.T) {
 			checkFunc: func(t *testing.T, m *Manager) {
 				if m.config == nil {
 					t.Fatal("config should be loaded")
-				}
-				if m.config.Validate.Timeout != 120 {
-					t.Errorf("timeout = %d, want 120", m.config.Validate.Timeout)
 				}
 				if m.config.Statusline.Workspace != "test-workspace" {
 					t.Errorf("workspace = %s, want test-workspace", m.config.Statusline.Workspace)
@@ -153,24 +146,6 @@ func TestGetInt(t *testing.T) {
 		wantFound bool
 		wantErr   bool
 	}{
-		{
-			name: "get validate timeout",
-			config: &ConfigValues{
-				Validate: ValidateConfigValues{Timeout: 90},
-			},
-			key:       keyValidateTimeout,
-			wantValue: 90,
-			wantFound: true,
-		},
-		{
-			name: "get validate cooldown",
-			config: &ConfigValues{
-				Validate: ValidateConfigValues{Cooldown: 15},
-			},
-			key:       keyValidateCooldown,
-			wantValue: 15,
-			wantFound: true,
-		},
 		{
 			name: "get statusline cache seconds",
 			config: &ConfigValues{
@@ -283,9 +258,9 @@ func TestGetValue(t *testing.T) {
 		{
 			name: "get int value as string",
 			config: &ConfigValues{
-				Validate: ValidateConfigValues{Timeout: 45},
+				Statusline: StatuslineConfigValues{CacheSeconds: 45},
 			},
-			key:       keyValidateTimeout,
+			key:       keyStatuslineCacheSeconds,
 			wantValue: "45",
 			wantFound: true,
 		},
@@ -340,12 +315,12 @@ func TestSet(t *testing.T) {
 		checkFunc func(t *testing.T, m *Manager)
 	}{
 		{
-			name:  "set validate timeout",
-			key:   keyValidateTimeout,
+			name:  "set statusline cache seconds",
+			key:   keyStatuslineCacheSeconds,
 			value: "180",
 			checkFunc: func(t *testing.T, m *Manager) {
-				if m.config.Validate.Timeout != 180 {
-					t.Errorf("timeout = %d, want 180", m.config.Validate.Timeout)
+				if m.config.Statusline.CacheSeconds != 180 {
+					t.Errorf("cache_seconds = %d, want 180", m.config.Statusline.CacheSeconds)
 				}
 			},
 		},
@@ -361,7 +336,7 @@ func TestSet(t *testing.T) {
 		},
 		{
 			name:    "invalid int value",
-			key:     keyValidateTimeout,
+			key:     keyStatuslineCacheSeconds,
 			value:   "not-a-number",
 			wantErr: true,
 		},
@@ -410,10 +385,6 @@ func TestGetAll(t *testing.T) {
 	ctx := context.Background()
 
 	config := &ConfigValues{
-		Validate: ValidateConfigValues{
-			Timeout:  defaultValidateTimeout,
-			Cooldown: 10, // non-default
-		},
 		Statusline: StatuslineConfigValues{
 			Workspace:    "custom", // non-default
 			CacheDir:     "/dev/shm",
@@ -434,8 +405,6 @@ func TestGetAll(t *testing.T) {
 
 	// Check that all keys are present
 	expectedKeys := []string{
-		keyValidateTimeout,
-		keyValidateCooldown,
 		keyStatuslineWorkspace,
 		keyStatuslineCacheDir,
 		keyStatuslineCacheSeconds,
@@ -448,14 +417,11 @@ func TestGetAll(t *testing.T) {
 	}
 
 	// Check IsDefault flags
-	if !all[keyValidateTimeout].IsDefault {
-		t.Error("validate.timeout should be marked as default")
-	}
-	if all[keyValidateCooldown].IsDefault {
-		t.Error("validate.cooldown should not be marked as default")
-	}
 	if all[keyStatuslineWorkspace].IsDefault {
 		t.Error("statusline.workspace should not be marked as default")
+	}
+	if !all[keyStatuslineCacheSeconds].IsDefault {
+		t.Error("statusline.cache_seconds should be marked as default")
 	}
 }
 
@@ -472,8 +438,6 @@ func TestGetAllKeys(t *testing.T) {
 		"statusline.cache_dir",
 		"statusline.cache_seconds",
 		"statusline.workspace",
-		"validate.cooldown",
-		"validate.timeout",
 	}
 
 	if len(keys) != len(expectedKeys) {
@@ -498,12 +462,12 @@ func TestReset(t *testing.T) {
 		checkFunc func(t *testing.T, m *Manager)
 	}{
 		{
-			name:      "reset validate timeout",
-			key:       keyValidateTimeout,
+			name:      "reset statusline cache seconds",
+			key:       keyStatuslineCacheSeconds,
 			initValue: "999",
 			checkFunc: func(t *testing.T, m *Manager) {
-				if m.config.Validate.Timeout != defaultValidateTimeout {
-					t.Errorf("timeout = %d, want %d", m.config.Validate.Timeout, defaultValidateTimeout)
+				if m.config.Statusline.CacheSeconds != defaultStatuslineCacheSeconds {
+					t.Errorf("cache_seconds = %d, want %d", m.config.Statusline.CacheSeconds, defaultStatuslineCacheSeconds)
 				}
 			},
 		},
@@ -561,10 +525,6 @@ func TestResetAll(t *testing.T) {
 	m := &Manager{
 		configPath: filepath.Join(tmpDir, "config.json"),
 		config: &ConfigValues{
-			Validate: ValidateConfigValues{
-				Timeout:  999,
-				Cooldown: 999,
-			},
 			Statusline: StatuslineConfigValues{
 				Workspace:    "custom",
 				CacheDir:     "/custom",
@@ -580,12 +540,6 @@ func TestResetAll(t *testing.T) {
 
 	// Check all values are reset to defaults
 	defaults := getDefaultConfig()
-	if m.config.Validate.Timeout != defaults.Validate.Timeout {
-		t.Errorf("timeout not reset to default")
-	}
-	if m.config.Validate.Cooldown != defaults.Validate.Cooldown {
-		t.Errorf("cooldown not reset to default")
-	}
 	if m.config.Statusline.Workspace != defaults.Statusline.Workspace {
 		t.Errorf("workspace not reset to default")
 	}
@@ -600,7 +554,7 @@ func TestResetAll(t *testing.T) {
 	data, _ := os.ReadFile(m.configPath)
 	var savedConfig ConfigValues
 	json.Unmarshal(data, &savedConfig)
-	if savedConfig.Validate.Timeout != defaults.Validate.Timeout {
+	if savedConfig.Statusline.CacheSeconds != defaults.Statusline.CacheSeconds {
 		t.Error("saved config not reset to defaults")
 	}
 }
@@ -616,10 +570,6 @@ func TestLoadConfig(t *testing.T) {
 			name: "loads structured config",
 			setupFunc: func(t *testing.T, configPath string) {
 				config := &ConfigValues{
-					Validate: ValidateConfigValues{
-						Timeout:  120,
-						Cooldown: 10,
-					},
 					Statusline: StatuslineConfigValues{
 						Workspace:    "test",
 						CacheDir:     "/tmp",
@@ -631,9 +581,6 @@ func TestLoadConfig(t *testing.T) {
 				os.WriteFile(configPath, data, 0600)
 			},
 			checkFunc: func(t *testing.T, m *Manager) {
-				if m.config.Validate.Timeout != 120 {
-					t.Errorf("timeout = %d, want 120", m.config.Validate.Timeout)
-				}
 				if m.config.Statusline.Workspace != "test" {
 					t.Errorf("workspace = %s, want test", m.config.Statusline.Workspace)
 				}
@@ -643,10 +590,6 @@ func TestLoadConfig(t *testing.T) {
 			name: "loads map-based config for backward compatibility",
 			setupFunc: func(t *testing.T, configPath string) {
 				mapConfig := map[string]any{
-					"validate": map[string]any{
-						"timeout":  90.0,
-						"cooldown": 5.0,
-					},
 					"statusline": map[string]any{
 						"workspace":     "legacy",
 						"cache_dir":     "/legacy",
@@ -658,9 +601,6 @@ func TestLoadConfig(t *testing.T) {
 				os.WriteFile(configPath, data, 0600)
 			},
 			checkFunc: func(t *testing.T, m *Manager) {
-				if m.config.Validate.Timeout != 90 {
-					t.Errorf("timeout = %d, want 90", m.config.Validate.Timeout)
-				}
 				if m.config.Statusline.Workspace != "legacy" {
 					t.Errorf("workspace = %s, want legacy", m.config.Statusline.Workspace)
 				}
@@ -670,8 +610,8 @@ func TestLoadConfig(t *testing.T) {
 			name: "uses defaults when file doesn't exist",
 			checkFunc: func(t *testing.T, m *Manager) {
 				defaults := getDefaultConfig()
-				if m.config.Validate.Timeout != defaults.Validate.Timeout {
-					t.Errorf("timeout = %d, want %d", m.config.Validate.Timeout, defaults.Validate.Timeout)
+				if m.config.Statusline.CacheSeconds != defaults.Statusline.CacheSeconds {
+					t.Errorf("cache_seconds = %d, want %d", m.config.Statusline.CacheSeconds, defaults.Statusline.CacheSeconds)
 				}
 			},
 		},
@@ -680,10 +620,6 @@ func TestLoadConfig(t *testing.T) {
 			setupFunc: func(t *testing.T, configPath string) {
 				// Partial config with some fields missing
 				config := &ConfigValues{
-					Validate: ValidateConfigValues{
-						Timeout: 100,
-						// Cooldown missing - should use default
-					},
 					Statusline: StatuslineConfigValues{
 						Workspace: "partial",
 						// CacheDir and CacheSeconds missing
@@ -694,12 +630,6 @@ func TestLoadConfig(t *testing.T) {
 				os.WriteFile(configPath, data, 0600)
 			},
 			checkFunc: func(t *testing.T, m *Manager) {
-				if m.config.Validate.Timeout != 100 {
-					t.Errorf("timeout = %d, want 100", m.config.Validate.Timeout)
-				}
-				if m.config.Validate.Cooldown != defaultValidateCooldown {
-					t.Errorf("cooldown = %d, want default %d", m.config.Validate.Cooldown, defaultValidateCooldown)
-				}
 				if m.config.Statusline.CacheDir != "/dev/shm" {
 					t.Errorf("cache_dir = %s, want /dev/shm", m.config.Statusline.CacheDir)
 				}
@@ -750,10 +680,6 @@ func TestSaveConfig(t *testing.T) {
 		{
 			name: "saves config successfully",
 			config: &ConfigValues{
-				Validate: ValidateConfigValues{
-					Timeout:  100,
-					Cooldown: 10,
-				},
 				Statusline: StatuslineConfigValues{
 					Workspace:    "test",
 					CacheDir:     "/tmp",
@@ -764,9 +690,8 @@ func TestSaveConfig(t *testing.T) {
 		{
 			name: "creates directory if missing",
 			config: &ConfigValues{
-				Validate: ValidateConfigValues{
-					Timeout:  60,
-					Cooldown: 5,
+				Statusline: StatuslineConfigValues{
+					CacheSeconds: 60,
 				},
 			},
 		},
@@ -838,10 +763,6 @@ func TestGetConfig(t *testing.T) {
 	ctx := context.Background()
 
 	expectedConfig := &ConfigValues{
-		Validate: ValidateConfigValues{
-			Timeout:  90,
-			Cooldown: 10,
-		},
 		Statusline: StatuslineConfigValues{
 			Workspace:    "test",
 			CacheDir:     "/tmp",
@@ -883,8 +804,8 @@ func TestGetConfig(t *testing.T) {
 		t.Fatal("GetConfig() should have loaded config")
 	}
 
-	if config2.Validate.Timeout != expectedConfig.Validate.Timeout {
-		t.Errorf("Lazy loaded timeout = %d, want %d", config2.Validate.Timeout, expectedConfig.Validate.Timeout)
+	if config2.Statusline.CacheSeconds != expectedConfig.Statusline.CacheSeconds {
+		t.Errorf("Lazy loaded cache_seconds = %d, want %d", config2.Statusline.CacheSeconds, expectedConfig.Statusline.CacheSeconds)
 	}
 }
 
@@ -909,16 +830,9 @@ func TestEnsureDefaults(t *testing.T) {
 		{
 			name: "fills in zero values with defaults",
 			input: &ConfigValues{
-				Validate:   ValidateConfigValues{},
 				Statusline: StatuslineConfigValues{},
 			},
 			check: func(t *testing.T, config *ConfigValues) {
-				if config.Validate.Timeout != defaultValidateTimeout {
-					t.Errorf("timeout = %d, want %d", config.Validate.Timeout, defaultValidateTimeout)
-				}
-				if config.Validate.Cooldown != defaultValidateCooldown {
-					t.Errorf("cooldown = %d, want %d", config.Validate.Cooldown, defaultValidateCooldown)
-				}
 				if config.Statusline.CacheDir != "/dev/shm" {
 					t.Errorf("cache_dir = %s, want /dev/shm", config.Statusline.CacheDir)
 				}
@@ -930,10 +844,6 @@ func TestEnsureDefaults(t *testing.T) {
 		{
 			name: "preserves non-zero values",
 			input: &ConfigValues{
-				Validate: ValidateConfigValues{
-					Timeout:  100,
-					Cooldown: 10,
-				},
 				Statusline: StatuslineConfigValues{
 					Workspace:    "custom",
 					CacheDir:     "/custom",
@@ -941,9 +851,6 @@ func TestEnsureDefaults(t *testing.T) {
 				},
 			},
 			check: func(t *testing.T, config *ConfigValues) {
-				if config.Validate.Timeout != 100 {
-					t.Errorf("timeout = %d, want 100", config.Validate.Timeout)
-				}
 				if config.Statusline.Workspace != "custom" {
 					t.Errorf("workspace = %s, want custom", config.Statusline.Workspace)
 				}
@@ -971,10 +878,6 @@ func TestConvertFromMap(t *testing.T) {
 		{
 			name: "converts all fields",
 			mapInput: map[string]any{
-				"validate": map[string]any{
-					"timeout":  120.0,
-					"cooldown": 10.0,
-				},
 				"statusline": map[string]any{
 					"workspace":     "test-ws",
 					"cache_dir":     "/test/cache",
@@ -982,12 +885,6 @@ func TestConvertFromMap(t *testing.T) {
 				},
 			},
 			check: func(t *testing.T, config *ConfigValues) {
-				if config.Validate.Timeout != 120 {
-					t.Errorf("timeout = %d, want 120", config.Validate.Timeout)
-				}
-				if config.Validate.Cooldown != 10 {
-					t.Errorf("cooldown = %d, want 10", config.Validate.Cooldown)
-				}
 				if config.Statusline.Workspace != "test-ws" {
 					t.Errorf("workspace = %s, want test-ws", config.Statusline.Workspace)
 				}
@@ -1000,33 +897,10 @@ func TestConvertFromMap(t *testing.T) {
 			},
 		},
 		{
-			name: "handles missing sections",
-			mapInput: map[string]any{
-				"validate": map[string]any{
-					"timeout": 90.0,
-				},
-			},
-			check: func(t *testing.T, config *ConfigValues) {
-				if config.Validate.Timeout != 90 {
-					t.Errorf("timeout = %d, want 90", config.Validate.Timeout)
-				}
-				// Should have defaults for missing values
-				if config.Validate.Cooldown != defaultValidateCooldown {
-					t.Errorf("cooldown = %d, want default %d", config.Validate.Cooldown, defaultValidateCooldown)
-				}
-				if config.Statusline.CacheDir != "/dev/shm" {
-					t.Errorf("cache_dir = %s, want default /dev/shm", config.Statusline.CacheDir)
-				}
-			},
-		},
-		{
 			name:     "handles empty map",
 			mapInput: map[string]any{},
 			check: func(t *testing.T, config *ConfigValues) {
 				defaults := getDefaultConfig()
-				if config.Validate.Timeout != defaults.Validate.Timeout {
-					t.Errorf("should have default timeout")
-				}
 				if config.Statusline.CacheDir != defaults.Statusline.CacheDir {
 					t.Errorf("should have default cache_dir")
 				}
@@ -1035,18 +909,12 @@ func TestConvertFromMap(t *testing.T) {
 		{
 			name: "handles wrong types gracefully",
 			mapInput: map[string]any{
-				"validate": "not-a-map",
 				"statusline": map[string]any{
 					"workspace":     123, // wrong type
 					"cache_seconds": "not-a-number",
 				},
 			},
 			check: func(t *testing.T, config *ConfigValues) {
-				// Should use defaults when types are wrong
-				defaults := getDefaultConfig()
-				if config.Validate.Timeout != defaults.Validate.Timeout {
-					t.Errorf("should have default timeout when validate is wrong type")
-				}
 				if config.Statusline.Workspace != "" {
 					t.Errorf("workspace should be empty when wrong type")
 				}
@@ -1070,8 +938,6 @@ func TestGetDefaultValue(t *testing.T) {
 		key  string
 		want string
 	}{
-		{keyValidateTimeout, "60"},
-		{keyValidateCooldown, "5"},
 		{keyStatuslineCacheSeconds, "20"},
 		{keyStatuslineWorkspace, ""},
 		{keyStatuslineCacheDir, "/dev/shm"},

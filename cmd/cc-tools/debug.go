@@ -89,8 +89,6 @@ func enableDebug(ctx context.Context, out *output.Terminal, manager *debug.Manag
 
 	out.Success("✓ Debug logging enabled for %s", dir)
 	out.Info("  Log file: %s", logFile)
-	_ = out.Write("")
-	out.Info("cc-tools-validate will write debug logs to this file.")
 
 	return nil
 }

@@ -24,10 +24,6 @@ func TestLoadFromJSON(t *testing.T) {
 	// Write test JSON config
 	configPath := filepath.Join(ccToolsDir, "config.json")
 	jsonContent := map[string]any{
-		"validate": map[string]any{
-			"timeout":  90,
-			"cooldown": 10,
-		},
 		"notifications": map[string]any{
 			"ntfy_topic": "test-topic",
 		},
@@ -49,12 +45,6 @@ func TestLoadFromJSON(t *testing.T) {
 	}
 
 	// Check values
-	if cfg.Hooks.Validate.TimeoutSeconds != 90 {
-		t.Errorf("Expected timeout to be 90, got %d", cfg.Hooks.Validate.TimeoutSeconds)
-	}
-	if cfg.Hooks.Validate.CooldownSeconds != 10 {
-		t.Errorf("Expected cooldown to be 10, got %d", cfg.Hooks.Validate.CooldownSeconds)
-	}
 	if cfg.Notifications.NtfyTopic != "test-topic" {
 		t.Errorf("Expected ntfy_topic to be 'test-topic', got '%s'", cfg.Notifications.NtfyTopic)
 	}
@@ -70,12 +60,9 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Check default values
-	if cfg.Hooks.Validate.TimeoutSeconds != 60 {
-		t.Errorf("Expected default timeout to be 60, got %d", cfg.Hooks.Validate.TimeoutSeconds)
-	}
-	if cfg.Hooks.Validate.CooldownSeconds != 5 {
-		t.Errorf("Expected default cooldown to be 5, got %d", cfg.Hooks.Validate.CooldownSeconds)
+	// Check default values - notifications should be empty
+	if cfg.Notifications.NtfyTopic != "" {
+		t.Errorf("Expected default ntfy_topic to be empty, got %s", cfg.Notifications.NtfyTopic)
 	}
 }
 
@@ -92,12 +79,8 @@ func TestLoadFromManager(t *testing.T) {
 		t.Fatalf("Failed to ensure config: %v", err)
 	}
 
-	if err := manager.Set(ctx, "validate.timeout", "100"); err != nil {
-		t.Fatalf("Failed to set timeout: %v", err)
-	}
-
-	if err := manager.Set(ctx, "validate.cooldown", "8"); err != nil {
-		t.Fatalf("Failed to set cooldown: %v", err)
+	if err := manager.Set(ctx, "statusline.workspace", "test-workspace"); err != nil {
+		t.Fatalf("Failed to set workspace: %v", err)
 	}
 
 	// Load config using manager
@@ -106,12 +89,9 @@ func TestLoadFromManager(t *testing.T) {
 		t.Fatalf("Failed to load config from manager: %v", err)
 	}
 
-	// Check values
-	if cfg.Hooks.Validate.TimeoutSeconds != 100 {
-		t.Errorf("Expected timeout to be 100, got %d", cfg.Hooks.Validate.TimeoutSeconds)
-	}
-	if cfg.Hooks.Validate.CooldownSeconds != 8 {
-		t.Errorf("Expected cooldown to be 8, got %d", cfg.Hooks.Validate.CooldownSeconds)
+	// Check values - Config struct doesn't have statusline, but we can verify it loaded without error
+	if cfg == nil {
+		t.Error("Expected config to be loaded")
 	}
 }
 

@@ -12,8 +12,6 @@ import (
 
 // Configuration keys.
 const (
-	keyValidateTimeout        = "validate.timeout"
-	keyValidateCooldown       = "validate.cooldown"
 	keyStatuslineCacheSeconds = "statusline.cache_seconds"
 	keyStatuslineWorkspace    = "statusline.workspace"
 	keyStatuslineCacheDir     = "statusline.cache_dir"
@@ -21,14 +19,7 @@ const (
 
 // ConfigValues represents the concrete configuration structure.
 type ConfigValues struct {
-	Validate   ValidateConfigValues   `json:"validate"`
 	Statusline StatuslineConfigValues `json:"statusline"`
-}
-
-// ValidateConfigValues represents validate-related settings.
-type ValidateConfigValues struct {
-	Timeout  int `json:"timeout"`
-	Cooldown int `json:"cooldown"`
 }
 
 // StatuslineConfigValues represents statusline-related settings.
@@ -51,8 +42,6 @@ type ConfigInfo struct {
 }
 
 const (
-	defaultValidateTimeout        = 60
-	defaultValidateCooldown       = 5
 	defaultStatuslineCacheSeconds = 20
 )
 
@@ -97,10 +86,6 @@ func (m *Manager) GetInt(_ context.Context, key string) (int, bool, error) {
 	}
 
 	switch key {
-	case keyValidateTimeout:
-		return m.config.Validate.Timeout, true, nil
-	case keyValidateCooldown:
-		return m.config.Validate.Cooldown, true, nil
 	case keyStatuslineCacheSeconds:
 		return m.config.Statusline.CacheSeconds, true, nil
 	default:
@@ -136,10 +121,6 @@ func (m *Manager) GetValue(_ context.Context, key string) (string, bool, error) 
 	}
 
 	switch key {
-	case keyValidateTimeout:
-		return strconv.Itoa(m.config.Validate.Timeout), true, nil
-	case keyValidateCooldown:
-		return strconv.Itoa(m.config.Validate.Cooldown), true, nil
 	case keyStatuslineCacheSeconds:
 		return strconv.Itoa(m.config.Statusline.CacheSeconds), true, nil
 	case keyStatuslineWorkspace:
@@ -161,18 +142,6 @@ func (m *Manager) Set(_ context.Context, key string, value string) error {
 
 	// Parse and set the value
 	switch key {
-	case keyValidateTimeout:
-		intVal, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("value must be an integer: %w", err)
-		}
-		m.config.Validate.Timeout = intVal
-	case keyValidateCooldown:
-		intVal, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("value must be an integer: %w", err)
-		}
-		m.config.Validate.Cooldown = intVal
 	case keyStatuslineCacheSeconds:
 		intVal, err := strconv.Atoi(value)
 		if err != nil {
@@ -208,8 +177,6 @@ func (m *Manager) GetAll(ctx context.Context) (map[string]ConfigInfo, error) {
 
 	// Process all configuration keys
 	keys := []string{
-		keyValidateTimeout,
-		keyValidateCooldown,
 		keyStatuslineWorkspace,
 		keyStatuslineCacheDir,
 		keyStatuslineCacheSeconds,
@@ -231,8 +198,6 @@ func (m *Manager) GetAll(ctx context.Context) (map[string]ConfigInfo, error) {
 // GetAllKeys returns all available configuration keys.
 func (m *Manager) GetAllKeys(_ context.Context) ([]string, error) {
 	keys := []string{
-		keyValidateTimeout,
-		keyValidateCooldown,
 		keyStatuslineWorkspace,
 		keyStatuslineCacheDir,
 		keyStatuslineCacheSeconds,
@@ -253,10 +218,6 @@ func (m *Manager) Reset(_ context.Context, key string) error {
 
 	// Reset to default value
 	switch key {
-	case keyValidateTimeout:
-		m.config.Validate.Timeout = defaults.Validate.Timeout
-	case keyValidateCooldown:
-		m.config.Validate.Cooldown = defaults.Validate.Cooldown
 	case keyStatuslineCacheSeconds:
 		m.config.Statusline.CacheSeconds = defaults.Statusline.CacheSeconds
 	case keyStatuslineWorkspace:
@@ -373,10 +334,6 @@ func (m *Manager) createDefaultConfig() error {
 // getDefaultConfig returns a new config with default values.
 func getDefaultConfig() *ConfigValues {
 	return &ConfigValues{
-		Validate: ValidateConfigValues{
-			Timeout:  defaultValidateTimeout,
-			Cooldown: defaultValidateCooldown,
-		},
 		Statusline: StatuslineConfigValues{
 			Workspace:    "",
 			CacheDir:     "/dev/shm",
@@ -389,12 +346,6 @@ func getDefaultConfig() *ConfigValues {
 func (m *Manager) ensureDefaults() {
 	defaults := getDefaultConfig()
 
-	if m.config.Validate.Timeout == 0 {
-		m.config.Validate.Timeout = defaults.Validate.Timeout
-	}
-	if m.config.Validate.Cooldown == 0 {
-		m.config.Validate.Cooldown = defaults.Validate.Cooldown
-	}
 	if m.config.Statusline.CacheDir == "" {
 		m.config.Statusline.CacheDir = defaults.Statusline.CacheDir
 	}
@@ -407,16 +358,6 @@ func (m *Manager) ensureDefaults() {
 func (m *Manager) convertFromMap(mapConfig map[string]any) {
 	// Initialize with defaults
 	m.config = getDefaultConfig()
-
-	// Convert validate settings
-	if validateMap, validateOk := mapConfig["validate"].(map[string]any); validateOk {
-		if timeout, timeoutOk := validateMap["timeout"].(float64); timeoutOk {
-			m.config.Validate.Timeout = int(timeout)
-		}
-		if cooldown, cooldownOk := validateMap["cooldown"].(float64); cooldownOk {
-			m.config.Validate.Cooldown = int(cooldown)
-		}
-	}
 
 	// Convert statusline settings
 	if statuslineMap, statuslineOk := mapConfig["statusline"].(map[string]any); statuslineOk {
@@ -435,10 +376,6 @@ func (m *Manager) convertFromMap(mapConfig map[string]any) {
 // getDefaultValue returns the default value for a key as a string.
 func getDefaultValue(defaults *ConfigValues, key string) string {
 	switch key {
-	case keyValidateTimeout:
-		return strconv.Itoa(defaults.Validate.Timeout)
-	case keyValidateCooldown:
-		return strconv.Itoa(defaults.Validate.Cooldown)
 	case keyStatuslineCacheSeconds:
 		return strconv.Itoa(defaults.Statusline.CacheSeconds)
 	case keyStatuslineWorkspace:

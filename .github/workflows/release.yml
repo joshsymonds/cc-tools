@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -34,18 +34,18 @@ jobs:
         prerelease: false
         body: |
           ## Changes in this release
-          
-          Claude Code Tools - Go implementations of smart hooks for Claude Code
-          
+
+          Claude Code Tools - Go implementations of Claude Code utilities
+
           ## Installation
-          
+
           Download the appropriate binaries for your platform below and make them executable:
-          
+
           ```bash
           tar -xzf cc-tools-*.tar.gz
-          chmod +x smart-lint smart-test statusline
+          chmod +x cc-tools cc-tools-statusline
           # Move to your PATH, e.g.:
-          mv smart-lint smart-test statusline ~/bin/
+          mv cc-tools cc-tools-statusline ~/bin/
           ```
 
   build-and-upload:
@@ -69,7 +69,7 @@ jobs:
             goarch: arm
             goarm: 7
             suffix: linux-armv7
-          
+
           # macOS builds
           - os: macos-latest
             goos: darwin
@@ -79,7 +79,7 @@ jobs:
             goos: darwin
             goarch: arm64
             suffix: darwin-arm64
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -95,13 +95,12 @@ jobs:
         GOARCH: ${{ matrix.goarch }}
         GOARM: ${{ matrix.goarm }}
       run: |
-        go build -v -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o smart-lint ./cmd/smart-lint
-        go build -v -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o smart-test ./cmd/smart-test
-        go build -v -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o statusline ./cmd/statusline
+        go build -v -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o cc-tools ./cmd/cc-tools
+        go build -v -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o cc-tools-statusline ./cmd/cc-tools-statusline
 
     - name: Create archive
       run: |
-        tar -czf cc-tools-${{ matrix.suffix }}.tar.gz smart-lint smart-test statusline
+        tar -czf cc-tools-${{ matrix.suffix }}.tar.gz cc-tools cc-tools-statusline
 
     - name: Generate checksums
       run: |

@@ -187,7 +187,7 @@ func GetLogFilePath(dir string) string {
 		safeName = "root"
 	}
 
-	return fmt.Sprintf("/tmp/cc-tools-validate-%s-%s.log", safeName, hashStr)
+	return fmt.Sprintf("/tmp/cc-tools-%s-%s.log", safeName, hashStr)
 }
 
 func getConfigDir() string {

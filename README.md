@@ -1,15 +1,8 @@
 # cc-tools
 
-High-performance Go implementation of Claude Code hooks and utilities. Provides smart linting, testing, and statusline generation with minimal overhead.
+High-performance Go implementation of Claude Code utilities. Provides statusline generation and MCP management with minimal overhead.
 
 ## Features
-
-### 🚀 Smart Validation Hooks
-- **Auto-discovery** - Finds and runs your project's lint/test commands automatically
-- **Parallel execution** - Runs linting and testing simultaneously for speed
-- **Lock management** - Prevents duplicate runs with PID-based locking
-- **Clear feedback** - Success messages or blocking errors right in Claude Code
-- **Skip controls** - Temporarily disable per-directory when needed
 
 ### 📊 Rich Statusline
 - **Model & cost tracking** - Current model, token usage, running costs
@@ -21,24 +14,14 @@ High-performance Go implementation of Claude Code hooks and utilities. Provides 
 ### 🎛️ Development Controls
 - **MCP management** - Enable/disable context servers per-project
 - **Debug logging** - Detailed execution logs for troubleshooting
-- **Skip registry** - Pause validation for specific directories
 - **No daemon required** - Direct execution, no background processes
-
-### 🔍 Command Discovery
-- **Build tools** - Make, Just, NPM, Yarn, PNPM, Cargo
-- **Language-specific** - golangci-lint, ruff, pytest, cargo clippy
-- **Custom scripts** - Finds `./scripts/lint`, `./scripts/test`
-- **Config-aware** - Reads project settings and environment variables
-- **Timeout protection** - Configurable limits prevent hanging
 
 ## Installation
 
 ### Claude Code Hooks
 
-cc-tools provides powerful hooks that you can use in Claude Code itself. Hooks are shipped as separate binaries so that you may
-invoke them directly from Claude Code's `settings.json`
+cc-tools provides the statusline hook that you can use in Claude Code itself.
 
-- **`cc-tools-validate`** - Runs linting and testing on file changes
 - **`cc-tools-statusline`** - Generates the rich statusline
 
 ### Download Pre-built Binaries
@@ -52,7 +35,6 @@ tar -xzf cc-tools-linux-amd64.tar.gz
 
 # Move to ~/.claude/bin/ (or any directory in your PATH)
 mkdir -p ~/.claude/bin
-mv cc-tools-validate ~/.claude/bin/
 mv cc-tools-statusline ~/.claude/bin/
 chmod +x ~/.claude/bin/cc-tools-*
 ```
@@ -64,7 +46,6 @@ chmod +x ~/.claude/bin/cc-tools-*
 nix-build
 
 # Copy the required binaries
-cp ./result/bin/cc-tools-validate ~/.claude/bin/
 cp ./result/bin/cc-tools-statusline ~/.claude/bin/
 ```
 
@@ -75,7 +56,6 @@ cp ./result/bin/cc-tools-statusline ~/.claude/bin/
 make build
 
 # Copy the required binaries
-cp build/cc-tools-validate ~/.claude/bin/
 cp build/cc-tools-statusline ~/.claude/bin/
 ```
 
@@ -89,56 +69,13 @@ Add to your `~/.claude/settings.json`:
     "type": "command",
     "command": "~/.claude/bin/cc-tools-statusline",
     "padding": 0
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/bin/cc-tools-validate"
-          }
-        ]
-      }
-    ]
   }
 }
 ```
 
-The `cc-tools-validate` binary automatically runs both linting and testing based on the edited files.
-
 ## Control Commands
 
-The `cc-tools` binary provides powerful control commands for managing your development workflow:
-
-### Skip Controls
-
-Temporarily disable linting/testing for specific directories when you need to focus on rapid iteration:
-
-```bash
-# Skip both linting and testing in current directory
-cc-tools skip all
-
-# Skip only linting
-cc-tools skip lint
-
-# Skip only testing  
-cc-tools skip test
-
-# View skip status for current directory
-cc-tools skip status
-
-# List all directories with skip configurations
-cc-tools skip list
-
-# Remove all skips from current directory
-cc-tools unskip
-
-# Remove specific skip type
-cc-tools unskip lint
-cc-tools unskip test
-```
+The `cc-tools` binary provides control commands for managing your development workflow:
 
 ### Debug Logging
 
@@ -212,87 +149,6 @@ MCP management reads your existing MCP configurations from `~/.claude/settings.j
 
 ## Behavior
 
-### Linting & Testing Behavior
-
-The lint and test hooks follow a precise workflow designed for seamless Claude Code integration:
-
-#### Execution Flow
-
-1. **Project Root Discovery**: Finds the top-level directory by looking for markers like `.git`, `Makefile`, `Justfile`, `package.json`, `go.mod`, etc.
-
-2. **Lock Acquisition**: Attempts to acquire an exclusive lock from `/tmp/claude-hook-{lint|test}-<workspace-hash>.lock`
-
-3. **Exit Codes and Messages**:
-   - **Lock unavailable**: Exit code `0`, no output (silent failure)
-   - **Command succeeds**: Exit code `2`, displays `👉 Lints/Tests pass. Continue with your task.`
-   - **Command fails**: Exit code `2`, displays `⛔ BLOCKING: Run 'cd <dir> && <command>' to fix failures`
-   - **Command timeout**: Exit code `2`, displays `⛔ BLOCKING: Command timed out after <timeout>`
-
-4. **Lock Release**: Writes timestamp to lock file for cooldown enforcement
-
-### Linting
-
-Automatically discovers and runs your project's lint commands:
-
-```bash
-# Via Claude Code hook
-echo '{"hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_input": {"file_path": "main.go"}}' | cc-tools lint
-
-# Direct usage
-echo '{"file_path": "main.go"}' | cc-tools lint
-```
-
-Searches for (in order):
-1. `make lint`
-2. `just lint`  
-3. `npm/yarn/pnpm run lint`
-4. `./scripts/lint`
-5. Language-specific tools (golangci-lint, ruff, cargo clippy, etc.)
-
-### Testing
-
-Automatically discovers and runs your project's test commands:
-
-```bash
-# Via Claude Code hook
-echo '{"hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_input": {"file_path": "main_test.go"}}' | cc-tools test
-
-# Direct usage
-echo '{"file_path": "main_test.go"}' | cc-tools test
-```
-
-Searches for (in order):
-1. `make test`
-2. `just test`
-3. `npm/yarn/pnpm run test`
-4. `./scripts/test`
-5. Language-specific tools (go test, pytest, cargo test, etc.)
-
-### Example Hook Output
-
-#### Successful Lint
-```bash
-$ echo '{"hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_input": {"file_path": "/project/src/main.go"}}' | cc-tools lint
-👉 Lints pass. Continue with your task.
-$ echo $?
-2
-```
-
-#### Failed Lint
-```bash
-$ echo '{"hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_input": {"file_path": "/project/src/main.go"}}' | cc-tools lint
-⛔ BLOCKING: Run 'cd /project && make lint' to fix lint failures
-$ echo $?
-2
-```
-
-#### Lock Unavailable (Another Instance Running)
-```bash
-$ echo '{"hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_input": {"file_path": "/project/src/main.go"}}' | cc-tools lint
-$ echo $?
-0
-```
-
 ### Statusline
 
 Generates a rich statusline for Claude Code prompts:
@@ -319,26 +175,17 @@ cc-tools config list
 #     - statusline.cache_dir = /dev/shm (default)
 #     - statusline.cache_seconds = 20 (default)
 #     - statusline.workspace =  (default)
-#   validate:
-#     - validate.timeout = 90              # <-- Custom value (no "default" label)
-#     - validate.cooldown = 5 (default)
 
 # View the raw JSON config file
 cc-tools config show
 
 # Get a specific value
-cc-tools config get validate.timeout
+cc-tools config get statusline.cache_seconds
 ```
 
 ### Setting Configuration
 
 ```bash
-# Set validation timeout to 90 seconds
-cc-tools config set validate.timeout 90
-
-# Set cooldown between validations to 10 seconds
-cc-tools config set validate.cooldown 10
-
 # Set custom workspace label for statusline
 cc-tools config set statusline.workspace "my-project"
 
@@ -350,7 +197,7 @@ cc-tools config set statusline.cache_dir "/tmp"
 
 ```bash
 # Reset a specific setting to its default
-cc-tools config reset validate.timeout
+cc-tools config reset statusline.cache_seconds
 
 # Reset all settings to defaults
 cc-tools config reset
@@ -360,8 +207,6 @@ cc-tools config reset
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `validate.timeout` | 60 | Maximum seconds to wait for lint/test commands to complete |
-| `validate.cooldown` | 5 | Minimum seconds between validation runs for the same project |
 | `statusline.workspace` | "" | Custom label shown in statusline (e.g., project name) |
 | `statusline.cache_dir` | /dev/shm | Directory for statusline cache files (fast tmpfs recommended) |
 | `statusline.cache_seconds` | 20 | How long to cache statusline data before refreshing |
@@ -396,7 +241,7 @@ go test ./...
 go test -race ./...
 
 # Specific package
-go test ./internal/hooks/...
+go test ./internal/statusline/...
 
 # Verbose output
 go test -v ./...

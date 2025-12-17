@@ -17,7 +17,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         go: ['1.24.5']
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -85,7 +85,7 @@ jobs:
           # Exclude arm64 on Linux for CI speed
           - os: ubuntu-latest
             arch: arm64
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -97,22 +97,19 @@ jobs:
 
     - name: Build binaries
       run: |
-        GOOS=$(go env GOOS) GOARCH=${{ matrix.arch }} go build -v -o smart-lint-$(go env GOOS)-${{ matrix.arch }} ./cmd/smart-lint
-        GOOS=$(go env GOOS) GOARCH=${{ matrix.arch }} go build -v -o smart-test-$(go env GOOS)-${{ matrix.arch }} ./cmd/smart-test
-        GOOS=$(go env GOOS) GOARCH=${{ matrix.arch }} go build -v -o statusline-$(go env GOOS)-${{ matrix.arch }} ./cmd/statusline
+        GOOS=$(go env GOOS) GOARCH=${{ matrix.arch }} go build -v -o cc-tools-$(go env GOOS)-${{ matrix.arch }} ./cmd/cc-tools
+        GOOS=$(go env GOOS) GOARCH=${{ matrix.arch }} go build -v -o cc-tools-statusline-$(go env GOOS)-${{ matrix.arch }} ./cmd/cc-tools-statusline
 
     - name: Test binaries
       if: matrix.arch == 'amd64'  # Only test on native architecture
       run: |
-        ./smart-lint-$(go env GOOS)-${{ matrix.arch }} || true
-        ./smart-test-$(go env GOOS)-${{ matrix.arch }} || true
-        ./statusline-$(go env GOOS)-${{ matrix.arch }} || true
+        ./cc-tools-$(go env GOOS)-${{ matrix.arch }} version || true
+        ./cc-tools-statusline-$(go env GOOS)-${{ matrix.arch }} || true
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: cc-tools-${{ runner.os }}-${{ matrix.arch }}
         path: |
-          smart-lint-*
-          smart-test-*
-          statusline-*
+          cc-tools-*
+          cc-tools-statusline-*

@@ -3,15 +3,11 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"time"
 
-	"github.com/Veraticus/cc-tools/internal/config"
-	"github.com/Veraticus/cc-tools/internal/hooks"
 	"github.com/Veraticus/cc-tools/internal/output"
 	"github.com/Veraticus/cc-tools/internal/shared"
 	"github.com/Veraticus/cc-tools/internal/statusline"
@@ -40,12 +36,6 @@ func main() {
 	switch os.Args[1] {
 	case "statusline":
 		runStatusline()
-	case "validate":
-		runValidate()
-	case "skip":
-		runSkipCommand()
-	case "unskip":
-		runUnskipCommand()
 	case "debug":
 		runDebugCommand()
 	case "mcp":
@@ -72,9 +62,6 @@ Usage:
 
 Commands:
   statusline    Generate a status line for the prompt
-  validate      Run smart validation (lint and test in parallel)
-  skip          Configure skip settings for directories
-  unskip        Remove skip settings from directories
   debug         Configure debug logging for directories
   mcp           Manage Claude MCP servers
   config        Manage configuration settings
@@ -83,7 +70,6 @@ Commands:
 
 Examples:
   echo '{"cwd": "/path"}' | cc-tools statusline
-  echo '{"file_path": "main.go"}' | cc-tools validate
   cc-tools mcp list
   cc-tools mcp enable jira
 `)
@@ -111,52 +97,6 @@ func runStatusline() {
 	}
 	// Output statusline result to stdout
 	out.Raw(result)
-}
-
-func loadValidateConfig() (int, int) {
-	timeoutSecs := 60
-	cooldownSecs := 5
-
-	// Load configuration
-	cfg, _ := config.Load()
-	if cfg != nil {
-		if cfg.Hooks.Validate.TimeoutSeconds > 0 {
-			timeoutSecs = cfg.Hooks.Validate.TimeoutSeconds
-		}
-		if cfg.Hooks.Validate.CooldownSeconds > 0 {
-			cooldownSecs = cfg.Hooks.Validate.CooldownSeconds
-		}
-	}
-
-	// Environment variables override config
-	if envTimeout := os.Getenv("CC_TOOLS_HOOKS_VALIDATE_TIMEOUT_SECONDS"); envTimeout != "" {
-		if val, err := strconv.Atoi(envTimeout); err == nil && val > 0 {
-			timeoutSecs = val
-		}
-	}
-	if envCooldown := os.Getenv("CC_TOOLS_HOOKS_VALIDATE_COOLDOWN_SECONDS"); envCooldown != "" {
-		if val, err := strconv.Atoi(envCooldown); err == nil && val >= 0 {
-			cooldownSecs = val
-		}
-	}
-
-	return timeoutSecs, cooldownSecs
-}
-
-func runValidate() {
-	timeoutSecs, cooldownSecs := loadValidateConfig()
-	debug := os.Getenv("CLAUDE_HOOKS_DEBUG") == "1"
-
-	exitCode := hooks.ValidateWithSkipCheck(
-		context.Background(),
-		os.Stdin,
-		os.Stdout,
-		os.Stderr,
-		debug,
-		timeoutSecs,
-		cooldownSecs,
-	)
-	os.Exit(exitCode)
 }
 
 func runStatuslineWithInput(reader io.Reader) (string, error) {
@@ -212,7 +152,7 @@ func debugLog() {
 	// Read stdin and save it for both debug and actual use
 	// Only read stdin for commands that actually need it
 	var stdinDebugData []byte
-	needsStdin := len(os.Args) > 1 && (os.Args[1] == "statusline" || os.Args[1] == "validate")
+	needsStdin := len(os.Args) > 1 && os.Args[1] == "statusline"
 
 	if needsStdin {
 		if stat, _ := os.Stdin.Stat(); (stat.Mode() & os.ModeCharDevice) == 0 {

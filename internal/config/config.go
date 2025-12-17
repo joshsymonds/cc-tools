@@ -11,19 +11,7 @@ import (
 
 // Config represents the application configuration.
 type Config struct {
-	Hooks         HooksConfig         `json:"hooks"`
 	Notifications NotificationsConfig `json:"notifications"`
-}
-
-// HooksConfig represents hook-related settings.
-type HooksConfig struct {
-	Validate ValidateConfig `json:"validate"`
-}
-
-// ValidateConfig represents validate hook settings.
-type ValidateConfig struct {
-	CooldownSeconds int `json:"cooldown_seconds"`
-	TimeoutSeconds  int `json:"timeout_seconds"`
 }
 
 // NotificationsConfig represents notification settings.
@@ -31,23 +19,11 @@ type NotificationsConfig struct {
 	NtfyTopic string `json:"ntfy_topic"`
 }
 
-const (
-	defaultCooldownSeconds = 5
-	defaultTimeoutSeconds  = 60
-)
-
 // Load loads configuration from the config file.
 // It reads from ~/.config/cc-tools/config.json.
 func Load() (*Config, error) {
 	// Set defaults
-	cfg := &Config{
-		Hooks: HooksConfig{
-			Validate: ValidateConfig{
-				CooldownSeconds: defaultCooldownSeconds,
-				TimeoutSeconds:  defaultTimeoutSeconds,
-			},
-		},
-	}
+	cfg := &Config{}
 
 	// Try to read config file
 	configPath := getConfigPath()
@@ -64,16 +40,6 @@ func Load() (*Config, error) {
 	var fileConfig map[string]any
 	if unmarshalErr := json.Unmarshal(data, &fileConfig); unmarshalErr != nil {
 		return nil, fmt.Errorf("parse config file: %w", unmarshalErr)
-	}
-
-	// Extract validate settings if they exist
-	if validate, validateOk := fileConfig["validate"].(map[string]any); validateOk {
-		if timeout, timeoutOk := validate["timeout"].(float64); timeoutOk {
-			cfg.Hooks.Validate.TimeoutSeconds = int(timeout)
-		}
-		if cooldown, cooldownOk := validate["cooldown"].(float64); cooldownOk {
-			cfg.Hooks.Validate.CooldownSeconds = int(cooldown)
-		}
 	}
 
 	// Extract notification settings if they exist

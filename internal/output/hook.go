@@ -41,18 +41,3 @@ func (h *HookFormatter) FormatBlockingError(format string, args ...any) string {
 	message := fmt.Sprintf(format, args...)
 	return h.FormatError(message)
 }
-
-// FormatTestPass formats a test pass message for Claude Code.
-func (h *HookFormatter) FormatTestPass() string {
-	return h.FormatWarning("👉 Tests pass. Continue with your task.")
-}
-
-// FormatLintPass formats a lint pass message for Claude Code.
-func (h *HookFormatter) FormatLintPass() string {
-	return h.FormatWarning("👉 Lints pass. Continue with your task.")
-}
-
-// FormatValidationPass formats a validation pass message for Claude Code.
-func (h *HookFormatter) FormatValidationPass() string {
-	return h.FormatWarning("👉 Validations pass. Continue with your task.")
-}

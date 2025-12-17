@@ -593,25 +593,25 @@ func TestGetLogFilePath(t *testing.T) {
 		{
 			name:         "generates path for normal directory",
 			inputDir:     "/home/user/project",
-			wantPrefix:   "/tmp/cc-tools-validate-project-",
+			wantPrefix:   "/tmp/cc-tools-project-",
 			wantContains: ".log",
 		},
 		{
 			name:         "handles root directory",
 			inputDir:     "/",
-			wantPrefix:   "/tmp/cc-tools-validate-root-",
+			wantPrefix:   "/tmp/cc-tools-root-",
 			wantContains: ".log",
 		},
 		{
 			name:         "handles relative path",
 			inputDir:     ".",
-			wantPrefix:   "/tmp/cc-tools-validate-",
+			wantPrefix:   "/tmp/cc-tools-",
 			wantContains: ".log",
 		},
 		{
 			name:         "sanitizes directory name",
 			inputDir:     "/path/with/many/levels",
-			wantPrefix:   "/tmp/cc-tools-validate-levels-",
+			wantPrefix:   "/tmp/cc-tools-levels-",
 			wantContains: ".log",
 		},
 	}

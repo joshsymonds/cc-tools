@@ -4,7 +4,6 @@
 build:
 	@echo "Building cc-tools binaries..."
 	@mkdir -p build
-	go build -o build/cc-tools-validate ./cmd/cc-tools-validate/
 	go build -o build/cc-tools-statusline ./cmd/cc-tools-statusline/
 	go build -o build/cc-tools ./cmd/cc-tools/
 	@echo "Binaries built in build/"
@@ -34,14 +33,9 @@ install: build
 	@echo "Installing cc-tools binaries..."
 	@mkdir -p ~/bin
 	cp build/cc-tools ~/bin/
-	cp build/cc-tools-validate ~/bin/
 	cp build/cc-tools-statusline ~/bin/
 	@echo "cc-tools binaries installed to ~/bin/"
 	@echo "Make sure ~/bin is in your PATH"
-
-# Run validate subcommand
-run-validate: build
-	./build/cc-tools validate
 
 # Run statusline subcommand
 run-statusline: build
@@ -82,13 +76,11 @@ nix-shell:
 .PHONY: help nix-build test-nix nix-shell
 help:
 	@echo "Available targets:"
-	@echo "  build         - Build cc-tools binary"
+	@echo "  build         - Build cc-tools binaries"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  test          - Run tests with coverage"
 	@echo "  lint          - Run linters"
 	@echo "  install       - Install commands to ~/bin"
-	@echo "  run-lint      - Run the lint subcommand"
-	@echo "  run-test      - Run the test subcommand"  
 	@echo "  run-statusline - Run the statusline subcommand"
 	@echo "  nix-build     - Build with Nix"
 	@echo "  test-nix      - Test Nix builds"
