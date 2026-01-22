@@ -34,7 +34,7 @@ func (s *Statusline) Render(data *CachedData) string {
 	}
 
 	// Build components with proper sizing that accounts for spacers
-	leftSection := s.buildLeftSection(dirPath, data.ModelDisplay, modelIcon, data, contentWidth)
+	leftSection := s.buildLeftSection(dirPath, data.ModelDisplay, modelIcon, contentWidth)
 	rightSection := s.buildRightSection(data, contentWidth)
 
 	// Spacers are width constraints, not visible spaces
@@ -93,7 +93,6 @@ func (s *Statusline) Render(data *CachedData) string {
 
 func (s *Statusline) buildLeftSection(
 	dirPath, modelDisplay, modelIcon string,
-	data *CachedData,
 	availableWidth int,
 ) string {
 	// Calculate proportional truncation lengths based on available width
@@ -103,11 +102,8 @@ func (s *Statusline) buildLeftSection(
 	dirMaxLen, modelMaxLen := 40, 40
 
 	// If available width is very constrained, scale down proportionally
-	// Reserve space for: curves(2) + chevrons(2) + spaces(6) + icon(2) + tokens(~10) = ~22 chars overhead
-	overhead := 22
-	if data.InputTokens > 0 || data.OutputTokens > 0 {
-		overhead += 10 // Extra space for token display
-	}
+	// Reserve space for: curves(2) + chevrons(2) + spaces(6) + icon(2) = ~12 chars overhead
+	overhead := 12
 
 	// Don't artificially limit the left section - let it use space it needs
 	// Only constrain if we're running out of total space

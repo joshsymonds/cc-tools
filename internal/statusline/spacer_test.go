@@ -17,10 +17,10 @@ func TestConfigurableSpacers(t *testing.T) {
 	t.Run("default spacers", func(t *testing.T) {
 		s := CreateStatusline(deps)
 		data := &CachedData{
-			ModelDisplay:  "Claude",
-			CurrentDir:    "/home/user",
-			TermWidth:     100,
-			ContextLength: 50000,
+			ModelDisplay:   "Claude",
+			CurrentDir:     "/home/user",
+			TermWidth:      100,
+			UsedPercentage: 25.0,
 		}
 
 		result := s.Render(data)
@@ -41,10 +41,10 @@ func TestConfigurableSpacers(t *testing.T) {
 		}
 		s := NewWithConfig(deps, config)
 		data := &CachedData{
-			ModelDisplay:  "Claude",
-			CurrentDir:    "/home/user",
-			TermWidth:     100,
-			ContextLength: 50000,
+			ModelDisplay:   "Claude",
+			CurrentDir:     "/home/user",
+			TermWidth:      100,
+			UsedPercentage: 25.0,
 		}
 
 		result := s.Render(data)
@@ -65,10 +65,10 @@ func TestConfigurableSpacers(t *testing.T) {
 		}
 		s := NewWithConfig(deps, config)
 		data := &CachedData{
-			ModelDisplay:  "Claude",
-			CurrentDir:    "/home/user",
-			TermWidth:     100,
-			ContextLength: 50000,
+			ModelDisplay:   "Claude",
+			CurrentDir:     "/home/user",
+			TermWidth:      100,
+			UsedPercentage: 25.0,
 		}
 
 		result := s.Render(data)
@@ -88,10 +88,10 @@ func TestConfigurableSpacers(t *testing.T) {
 		}
 		s := NewWithConfig(deps, config)
 		data := &CachedData{
-			ModelDisplay:  "Claude",
-			CurrentDir:    "/home/user",
-			TermWidth:     100,
-			ContextLength: 50000,
+			ModelDisplay:   "Claude",
+			CurrentDir:     "/home/user",
+			TermWidth:      100,
+			UsedPercentage: 25.0,
 		}
 
 		result := s.Render(data)
@@ -112,10 +112,10 @@ func TestConfigurableSpacers(t *testing.T) {
 		}
 		s := NewWithConfig(deps, config)
 		data := &CachedData{
-			ModelDisplay:  "Claude",
-			CurrentDir:    "/home/user",
-			TermWidth:     100,
-			ContextLength: 50000,
+			ModelDisplay:   "Claude",
+			CurrentDir:     "/home/user",
+			TermWidth:      100,
+			UsedPercentage: 25.0,
 		}
 
 		result := s.Render(data)
@@ -136,10 +136,10 @@ func TestConfigurableSpacers(t *testing.T) {
 		}
 		s := NewWithConfig(deps, config)
 		data := &CachedData{
-			ModelDisplay:  "Claude",
-			CurrentDir:    "/home/user",
-			TermWidth:     100,
-			ContextLength: 50000,
+			ModelDisplay:   "Claude",
+			CurrentDir:     "/home/user",
+			TermWidth:      100,
+			UsedPercentage: 25.0,
 		}
 
 		result := s.Render(data)
@@ -178,10 +178,10 @@ func TestConfigurableSpacers(t *testing.T) {
 		}
 		s := NewWithConfig(narrowDeps, config)
 		data := &CachedData{
-			ModelDisplay:  "Claude",
-			CurrentDir:    "/home/user",
-			TermWidth:     40,
-			ContextLength: 50000,
+			ModelDisplay:   "Claude",
+			CurrentDir:     "/home/user",
+			TermWidth:      40,
+			UsedPercentage: 25.0,
 		}
 
 		result := s.Render(data)
@@ -211,10 +211,10 @@ func TestSpacerScaling(t *testing.T) {
 	}
 	s := NewWithConfig(deps, config)
 	data := &CachedData{
-		ModelDisplay:  "Claude",
-		CurrentDir:    "/home/user",
-		TermWidth:     50,
-		ContextLength: 50000,
+		ModelDisplay:   "Claude",
+		CurrentDir:     "/home/user",
+		TermWidth:      50,
+		UsedPercentage: 25.0,
 	}
 
 	result := s.Render(data)

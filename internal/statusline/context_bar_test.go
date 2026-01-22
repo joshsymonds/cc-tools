@@ -18,10 +18,10 @@ func TestContextBarPadding(t *testing.T) {
 	t.Run("context bar has 4 space padding on each side", func(t *testing.T) {
 		s := CreateStatusline(deps)
 		data := &CachedData{
-			ModelDisplay:  "Claude",
-			CurrentDir:    "/home/user",
-			TermWidth:     100,
-			ContextLength: 50000, // Will show context bar
+			ModelDisplay:   "Claude",
+			CurrentDir:     "/home/user",
+			TermWidth:      100,
+			UsedPercentage: 25.0, // Will show context bar
 		}
 
 		result := s.Render(data)
@@ -35,7 +35,7 @@ func TestContextBarPadding(t *testing.T) {
 			// Find where "Context" appears
 			contextIndex := strings.Index(stripped, "Context")
 			if contextIndex == -1 {
-				t.Error("Context bar should be visible with context length > 0")
+				t.Error("Context bar should be visible with UsedPercentage > 0")
 				return
 			}
 
@@ -66,28 +66,28 @@ func TestContextBarPadding(t *testing.T) {
 
 		// Test with different widths to see how the bar adapts
 		testCases := []struct {
-			name          string
-			termWidth     int
-			contextLength int
-			minBarWidth   int // Minimum expected width for the context bar content (excluding padding)
+			name           string
+			termWidth      int
+			usedPercentage float64
+			minBarWidth    int // Minimum expected width for the context bar content (excluding padding)
 		}{
 			{
-				name:          "normal width",
-				termWidth:     120,
-				contextLength: 50000,
-				minBarWidth:   20, // Should have reasonable space for bar
+				name:           "normal width",
+				termWidth:      120,
+				usedPercentage: 25.0,
+				minBarWidth:    20, // Should have reasonable space for bar
 			},
 			{
-				name:          "narrow terminal",
-				termWidth:     80,
-				contextLength: 50000,
-				minBarWidth:   10, // Bar should be smaller but still visible
+				name:           "narrow terminal",
+				termWidth:      80,
+				usedPercentage: 25.0,
+				minBarWidth:    10, // Bar should be smaller but still visible
 			},
 			{
-				name:          "very narrow terminal",
-				termWidth:     60,
-				contextLength: 50000,
-				minBarWidth:   0, // Might not show bar at all if too narrow
+				name:           "very narrow terminal",
+				termWidth:      60,
+				usedPercentage: 25.0,
+				minBarWidth:    0, // Might not show bar at all if too narrow
 			},
 		}
 
@@ -95,10 +95,10 @@ func TestContextBarPadding(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				deps.TerminalWidth = &MockTerminalWidth{width: tc.termWidth}
 				data := &CachedData{
-					ModelDisplay:  "Claude",
-					CurrentDir:    "/home/user",
-					TermWidth:     tc.termWidth,
-					ContextLength: tc.contextLength,
+					ModelDisplay:   "Claude",
+					CurrentDir:     "/home/user",
+					TermWidth:      tc.termWidth,
+					UsedPercentage: tc.usedPercentage,
 				}
 
 				result := s.Render(data)
@@ -131,10 +131,10 @@ func TestContextBarPadding(t *testing.T) {
 		// Very narrow terminal where context bar won't fit with padding
 		deps.TerminalWidth = &MockTerminalWidth{width: 50}
 		data := &CachedData{
-			ModelDisplay:  "C",
-			CurrentDir:    "/",
-			TermWidth:     50,
-			ContextLength: 50000,
+			ModelDisplay:   "C",
+			CurrentDir:     "/",
+			TermWidth:      50,
+			UsedPercentage: 25.0,
 		}
 
 		result := s.Render(data)
@@ -163,15 +163,15 @@ func TestContextBarPadding(t *testing.T) {
 	})
 
 	t.Run("padding is exactly 4 spaces on each side", func(t *testing.T) {
-		// Direct test of createContextBar method
+		// Direct test of createContextBarFromPercentage method
 		s := CreateStatusline(deps)
 		s.colors = CatppuccinMocha{} // Initialize colors
 
 		// Give it plenty of width so we can clearly see the padding
 		barWidth := 60
-		contextLength := 50000
+		percentage := 25.0
 
-		result := s.createContextBar(contextLength, "", barWidth)
+		result := s.createContextBarFromPercentage(percentage, barWidth)
 
 		// The result should be exactly barWidth characters
 		stripped := stripAnsi(result)

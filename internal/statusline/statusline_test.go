@@ -189,18 +189,15 @@ func TestStatuslineGenerate(t *testing.T) {
 			input: `{
 				"model": {"display_name": "Claude"},
 				"workspace": {"project_dir": "/home/user/project"},
-				"transcript_path": "/tmp/transcript.jsonl"
+				"context_window": {
+					"used_percentage": 25.5,
+					"context_window_size": 200000
+				}
 			}`,
 			setup: func(deps *Dependencies) {
 				if envReader, ok := deps.EnvReader.(*MockEnvReader); ok {
 					envReader.vars["HOME"] = "/home/user"
 				}
-				fr, _ := deps.FileReader.(*MockFileReader)
-				// Add transcript with token usage (context bar shows percentage)
-				// Timestamp is required for context length calculation
-				fr.files["/tmp/transcript.jsonl"] = []byte(
-					`{"message": {"usage": {"input_tokens": 1500, "output_tokens": 300}}, "timestamp": "2025-01-01T10:00:00Z"}`,
-				)
 			},
 			contains: []string{
 				"Context", // Context bar should be visible
@@ -365,27 +362,27 @@ func TestContextBar(t *testing.T) {
 	sl := CreateStatusline(deps)
 
 	tests := []struct {
-		contextLength int
+		percentage    float64
 		barWidth      int
 		shouldContain []string
 	}{
 		{
-			contextLength: 40000, // 20% of 200k - green
+			percentage:    20.0, // 20% - green
 			barWidth:      50,
 			shouldContain: []string{"20.0%", "Context"},
 		},
 		{
-			contextLength: 100000, // 50% of 200k - yellow
+			percentage:    50.0, // 50% - yellow
 			barWidth:      50,
 			shouldContain: []string{"50.0%", "Context"},
 		},
 		{
-			contextLength: 150000, // 75% of 200k - peach
+			percentage:    75.0, // 75% - peach
 			barWidth:      50,
 			shouldContain: []string{"75.0%", "Context"},
 		},
 		{
-			contextLength: 200000, // 100% of 200k - red
+			percentage:    100.0, // 100% - red
 			barWidth:      50,
 			shouldContain: []string{"100.0%", "Context"},
 		},
@@ -393,7 +390,7 @@ func TestContextBar(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.shouldContain[0], func(t *testing.T) {
-			result := sl.createContextBar(tt.contextLength, "", tt.barWidth)
+			result := sl.createContextBarFromPercentage(tt.percentage, tt.barWidth)
 
 			for _, expected := range tt.shouldContain {
 				if !strings.Contains(result, expected) {

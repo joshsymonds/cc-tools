@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -42,14 +41,6 @@ type Input struct {
 	TranscriptPath string `json:"transcript_path"`
 }
 
-// TokenMetrics holds token usage information.
-type TokenMetrics struct {
-	InputTokens   int
-	OutputTokens  int
-	CachedTokens  int
-	ContextLength int
-}
-
 // CachedData represents cached statusline data.
 type CachedData struct {
 	ModelID        string
@@ -59,44 +50,11 @@ type CachedData struct {
 	GitBranch      string
 	GitStatus      string
 	K8sContext     string
-	InputTokens    int
-	OutputTokens   int
 	UsedPercentage float64
 	Hostname       string
 	Devspace       string
 	DevspaceSymbol string
 	TermWidth      int
-}
-
-// ContextConfig holds model-specific context window configuration.
-type ContextConfig struct {
-	MaxTokens    int
-	UsableTokens int
-}
-
-// getContextConfig returns the context window configuration for a model.
-// Sonnet 4.5 with [1m] suffix has 1M context, others have 200k.
-func getContextConfig(modelID string) ContextConfig {
-	// Default for older models
-	defaultConfig := ContextConfig{
-		MaxTokens:    200000,
-		UsableTokens: 160000,
-	}
-
-	if modelID == "" {
-		return defaultConfig
-	}
-
-	// Sonnet 4.5 variants with 1M context (requires [1m] suffix for long context beta)
-	if strings.Contains(modelID, "claude-sonnet-4-5") &&
-		strings.Contains(strings.ToLower(modelID), "[1m]") {
-		return ContextConfig{
-			MaxTokens:    1000000,
-			UsableTokens: 800000, // 80% of 1M
-		}
-	}
-
-	return defaultConfig
 }
 
 // Dependencies contains all external dependencies.
@@ -238,29 +196,8 @@ func (s *Statusline) computeData(currentDir string) *CachedData {
 	// Kubernetes context
 	data.K8sContext = s.getK8sContext()
 
-	// Token metrics
-	if data.TranscriptPath != "" && s.deps.FileReader.Exists(data.TranscriptPath) {
-		metrics := s.getTokenMetrics(data.TranscriptPath)
-		data.InputTokens = metrics.InputTokens
-		data.OutputTokens = metrics.OutputTokens
-		data.UsedPercentage = s.calculateUsedPercentage(metrics.ContextLength, data.ModelID)
-
-		// Debug
-		if os.Getenv("DEBUG_CONTEXT") == "1" {
-			debug := fmt.Sprintf(
-				"DEBUG computeData: TranscriptPath=%s, InputTokens=%d, OutputTokens=%d, UsedPercentage=%.2f\n",
-				data.TranscriptPath,
-				data.InputTokens,
-				data.OutputTokens,
-				data.UsedPercentage,
-			)
-			const debugFileMode = 0600
-			if err := os.WriteFile("/tmp/compute_debug.txt", []byte(debug), debugFileMode); err != nil { //nolint:gosec // Debug file
-				// Debug write failed - continue silently
-				_ = err
-			}
-		}
-	}
+	// Context window percentage (directly from input)
+	data.UsedPercentage = s.input.ContextWindow.UsedPercentage
 
 	// Hostname
 	data.Hostname = s.getHostname()
@@ -269,19 +206,6 @@ func (s *Statusline) computeData(currentDir string) *CachedData {
 	data.Devspace, data.DevspaceSymbol = s.getDevspace()
 
 	return data
-}
-
-// calculateUsedPercentage converts raw context length to percentage.
-func (s *Statusline) calculateUsedPercentage(contextLength int, modelID string) float64 {
-	if contextLength == 0 {
-		return 0
-	}
-	config := getContextConfig(modelID)
-	percentage := float64(contextLength) / float64(config.MaxTokens) * 100
-	if percentage > 100 {
-		percentage = 100
-	}
-	return percentage
 }
 
 func (s *Statusline) getGitInfo(dir string) GitInfo {
@@ -380,75 +304,6 @@ func (s *Statusline) getK8sContext() string {
 	}
 
 	return ""
-}
-
-func (s *Statusline) getTokenMetrics(transcriptPath string) TokenMetrics {
-	content, err := s.deps.FileReader.ReadFile(transcriptPath)
-	if err != nil {
-		return TokenMetrics{}
-	}
-
-	// Parse JSONL transcript file
-	lines := strings.Split(string(content), "\n")
-	metrics := TokenMetrics{}
-
-	// Track the most recent main chain entry for context length calculation
-	var mostRecentMainChainUsage struct {
-		InputTokens              int
-		CacheReadInputTokens     int
-		CacheCreationInputTokens int
-	}
-	var mostRecentTimestamp time.Time
-
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-
-		var msg struct {
-			Message struct {
-				Usage struct {
-					InputTokens              int `json:"input_tokens"`
-					OutputTokens             int `json:"output_tokens"`
-					CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-					CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-				} `json:"usage"`
-			} `json:"message"`
-			IsSidechain       bool   `json:"isSidechain"`
-			IsApiErrorMessage bool   `json:"isApiErrorMessage"`
-			Timestamp         string `json:"timestamp"`
-		}
-
-		unmarshalErr := json.Unmarshal([]byte(line), &msg)
-		if unmarshalErr == nil && msg.Message.Usage.InputTokens > 0 {
-			// Accumulate totals for all messages
-			metrics.InputTokens += msg.Message.Usage.InputTokens
-			metrics.OutputTokens += msg.Message.Usage.OutputTokens
-			// Include both cache_read and cache_creation in cached tokens
-			metrics.CachedTokens += msg.Message.Usage.CacheReadInputTokens
-			metrics.CachedTokens += msg.Message.Usage.CacheCreationInputTokens
-
-			// Track the most recent main chain entry (not sidechain, not API error) for context length
-			// Use timestamp to find truly most recent entry
-			if !msg.IsSidechain && !msg.IsApiErrorMessage && msg.Timestamp != "" {
-				entryTime, parseErr := time.Parse(time.RFC3339, msg.Timestamp)
-				if parseErr == nil && entryTime.After(mostRecentTimestamp) {
-					mostRecentTimestamp = entryTime
-					mostRecentMainChainUsage.InputTokens = msg.Message.Usage.InputTokens
-					mostRecentMainChainUsage.CacheReadInputTokens = msg.Message.Usage.CacheReadInputTokens
-					mostRecentMainChainUsage.CacheCreationInputTokens = msg.Message.Usage.CacheCreationInputTokens
-				}
-			}
-		}
-	}
-
-	// Context length is calculated from the most recent main chain entry
-	// It's the sum of input_tokens + cache_read_input_tokens + cache_creation_input_tokens
-	metrics.ContextLength = mostRecentMainChainUsage.InputTokens +
-		mostRecentMainChainUsage.CacheReadInputTokens +
-		mostRecentMainChainUsage.CacheCreationInputTokens
-
-	return metrics
 }
 
 func (s *Statusline) getHostname() string {
