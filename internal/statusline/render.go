@@ -354,22 +354,21 @@ func (s *Statusline) buildMiddleSection(data *CachedData, width int) string {
 	// Context bar only appears if there's at least 25 chars of space left after components
 	// This ensures components get priority for space
 	const minContextBarWidth = 25
-	if data.ContextLength > 0 && width >= minContextBarWidth {
-		return s.createContextBar(data.ContextLength, data.ModelID, width)
+	if data.UsedPercentage > 0 && width >= minContextBarWidth {
+		return s.createContextBarFromPercentage(data.UsedPercentage, width)
 	}
 
 	// Otherwise just spaces
 	return strings.Repeat(" ", width)
 }
 
-func (s *Statusline) createContextBar(contextLength int, modelID string, barWidth int) string {
+func (s *Statusline) createContextBarFromPercentage(percentage float64, barWidth int) string {
 	availableForBar := s.calculateAvailableBarWidth(barWidth)
 	const minSensibleBarSize = 15
 	if availableForBar < minSensibleBarSize {
 		return strings.Repeat(" ", barWidth)
 	}
 
-	percentage := s.calculateContextPercentage(contextLength, modelID)
 	bgColor, fgColor, fgLightBg := s.getContextColors(percentage)
 
 	barInfo := s.prepareContextBarInfo(percentage, availableForBar)
@@ -681,16 +680,6 @@ func (s *Statusline) calculateAvailableBarWidth(barWidth int) int {
 	const contextBarPadding = 4
 	const paddingMultiplier = 2
 	return barWidth - (contextBarPadding * paddingMultiplier)
-}
-
-func (s *Statusline) calculateContextPercentage(contextLength int, modelID string) float64 {
-	const maxPercentage = 100.0
-	contextConfig := getContextConfig(modelID)
-	percentage := float64(contextLength) * maxPercentage / float64(contextConfig.MaxTokens)
-	if percentage > maxPercentage {
-		return maxPercentage
-	}
-	return percentage
 }
 
 func (s *Statusline) getContextColors(percentage float64) (string, string, string) {
