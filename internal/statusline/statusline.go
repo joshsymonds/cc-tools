@@ -61,7 +61,7 @@ type CachedData struct {
 	K8sContext     string
 	InputTokens    int
 	OutputTokens   int
-	ContextLength  int
+	UsedPercentage float64
 	Hostname       string
 	Devspace       string
 	DevspaceSymbol string
@@ -243,16 +243,16 @@ func (s *Statusline) computeData(currentDir string) *CachedData {
 		metrics := s.getTokenMetrics(data.TranscriptPath)
 		data.InputTokens = metrics.InputTokens
 		data.OutputTokens = metrics.OutputTokens
-		data.ContextLength = metrics.ContextLength
+		data.UsedPercentage = s.calculateUsedPercentage(metrics.ContextLength, data.ModelID)
 
 		// Debug
 		if os.Getenv("DEBUG_CONTEXT") == "1" {
 			debug := fmt.Sprintf(
-				"DEBUG computeData: TranscriptPath=%s, InputTokens=%d, OutputTokens=%d, ContextLength=%d\n",
+				"DEBUG computeData: TranscriptPath=%s, InputTokens=%d, OutputTokens=%d, UsedPercentage=%.2f\n",
 				data.TranscriptPath,
 				data.InputTokens,
 				data.OutputTokens,
-				data.ContextLength,
+				data.UsedPercentage,
 			)
 			const debugFileMode = 0600
 			if err := os.WriteFile("/tmp/compute_debug.txt", []byte(debug), debugFileMode); err != nil { //nolint:gosec // Debug file
@@ -269,6 +269,19 @@ func (s *Statusline) computeData(currentDir string) *CachedData {
 	data.Devspace, data.DevspaceSymbol = s.getDevspace()
 
 	return data
+}
+
+// calculateUsedPercentage converts raw context length to percentage.
+func (s *Statusline) calculateUsedPercentage(contextLength int, modelID string) float64 {
+	if contextLength == 0 {
+		return 0
+	}
+	config := getContextConfig(modelID)
+	percentage := float64(contextLength) / float64(config.MaxTokens) * 100
+	if percentage > 100 {
+		percentage = 100
+	}
+	return percentage
 }
 
 func (s *Statusline) getGitInfo(dir string) GitInfo {

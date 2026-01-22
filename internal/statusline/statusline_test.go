@@ -102,6 +102,16 @@ func (m *MockTerminalWidth) GetWidth() int {
 	return m.width
 }
 
+func TestCachedData_UsedPercentage(t *testing.T) {
+	data := &CachedData{
+		UsedPercentage: 67.5,
+	}
+
+	if data.UsedPercentage != 67.5 {
+		t.Errorf("Expected UsedPercentage 67.5, got %f", data.UsedPercentage)
+	}
+}
+
 func TestInput_ContextWindow(t *testing.T) {
 	jsonInput := `{
 		"model": {"id": "claude-sonnet-4-5", "display_name": "Claude"},
