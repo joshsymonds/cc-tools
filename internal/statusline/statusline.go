@@ -24,6 +24,10 @@ type Input struct {
 		CacheReadTokens  int     `json:"cache_read_input_tokens"`
 		CacheWriteTokens int     `json:"cache_creation_input_tokens"`
 	} `json:"cost"`
+	ContextWindow struct {
+		UsedPercentage    float64 `json:"used_percentage"`
+		ContextWindowSize int     `json:"context_window_size"`
+	} `json:"context_window"`
 	GitInfo struct {
 		Branch       string `json:"branch"`
 		IsGitRepo    bool   `json:"is_git_repo"`

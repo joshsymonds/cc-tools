@@ -2,6 +2,7 @@ package statusline
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -99,6 +100,29 @@ func (m *MockTerminalWidth) GetWidth() int {
 		return 210
 	}
 	return m.width
+}
+
+func TestInput_ContextWindow(t *testing.T) {
+	jsonInput := `{
+		"model": {"id": "claude-sonnet-4-5", "display_name": "Claude"},
+		"context_window": {
+			"used_percentage": 45.5,
+			"context_window_size": 200000
+		}
+	}`
+
+	var input Input
+	err := json.Unmarshal([]byte(jsonInput), &input)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if input.ContextWindow.UsedPercentage != 45.5 {
+		t.Errorf("Expected UsedPercentage 45.5, got %f", input.ContextWindow.UsedPercentage)
+	}
+	if input.ContextWindow.ContextWindowSize != 200000 {
+		t.Errorf("Expected ContextWindowSize 200000, got %d", input.ContextWindow.ContextWindowSize)
+	}
 }
 
 func TestStatuslineGenerate(t *testing.T) {
