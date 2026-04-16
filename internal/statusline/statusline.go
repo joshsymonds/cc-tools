@@ -92,8 +92,7 @@ type TerminalWidth interface {
 // Config contains configuration for the statusline.
 type Config struct {
 	// LeftSpacerWidth is the width of the left spacer (default: 2)
-	LeftSpacerWidth int
-	// RightSpacerWidth is the width reserved for Claude Code's UI on the right
+	LeftSpacerWidth  int
 	RightSpacerWidth int
 }
 
@@ -101,7 +100,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	const (
 		defaultLeftSpacerWidth  = 2
-		defaultRightSpacerWidth = 40 // Reserve space for Claude Code's right-side UI
+		defaultRightSpacerWidth = 2
 	)
 	return &Config{
 		LeftSpacerWidth:  defaultLeftSpacerWidth,

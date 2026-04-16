@@ -648,7 +648,6 @@ func (s *Statusline) calculateWidths(termWidth int) (int, int, int) {
 		leftSpacer = s.config.LeftSpacerWidth
 	}
 
-	// Always reserve space for Claude Code's UI on the right
 	rightSpacer := s.config.RightSpacerWidth
 
 	effectiveWidth := termWidth - leftSpacer - rightSpacer

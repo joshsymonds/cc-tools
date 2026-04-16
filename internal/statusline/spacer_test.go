@@ -27,10 +27,10 @@ func TestConfigurableSpacers(t *testing.T) {
 		stripped := stripAnsi(result)
 		width := runewidth.StringWidth(stripped)
 
-		// Default config has 2 char left + 40 char right = 42 chars total spacers
-		// So the output should be termWidth - 42 = 58 chars wide
-		if width != 58 {
-			t.Errorf("With default spacers (2+40), width should be 58, got %d", width)
+		// Default config has 2 char left + 2 char right = 4 chars total spacers
+		// So the output should be termWidth - 4 = 96 chars wide
+		if width != 96 {
+			t.Errorf("With default spacers (2+2), width should be 96, got %d", width)
 		}
 	})
 
