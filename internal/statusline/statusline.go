@@ -355,7 +355,13 @@ func (s *Statusline) getDevspace() (string, string) {
 		return "", ""
 	}
 
+	// Known planets render with their astronomical glyph and a 3-char
+	// label — the glyph carries identity, the text just confirms it.
+	// Arbitrary devspace names (e.g. branch names) use the generic ●
+	// glyph and keep their full label since the name itself is the only
+	// identifier.
 	var symbol string
+	knownPlanet := true
 	switch tmuxDevspace {
 	case "mercury":
 		symbol = "☿"
@@ -369,9 +375,17 @@ func (s *Statusline) getDevspace() (string, string) {
 		symbol = "♃"
 	default:
 		symbol = "●"
+		knownPlanet = false
 	}
 
-	return symbol + " " + tmuxDevspace, symbol
+	label := tmuxDevspace
+	if knownPlanet {
+		const devspaceLabelMax = 3
+		if len(label) > devspaceLabelMax {
+			label = label[:devspaceLabelMax]
+		}
+	}
+	return symbol + " " + label, symbol
 }
 
 func (s *Statusline) getColorBG(color string) string {

@@ -217,12 +217,14 @@ func TestStatusline_GetDevspace(t *testing.T) {
 			expectedText:   "● saturn",
 			expectedSymbol: "●",
 		},
+		// Names are truncated to 3 chars in the chip so the symbol does
+		// the heavy lifting and the word just confirms the planet.
 		{
 			name: "mercury from TMUX_DEVSPACE",
 			setup: func(er *MockEnvReader) {
 				er.vars["TMUX_DEVSPACE"] = "mercury"
 			},
-			expectedText:   "☿ mercury",
+			expectedText:   "☿ mer",
 			expectedSymbol: "☿",
 		},
 		{
@@ -230,7 +232,7 @@ func TestStatusline_GetDevspace(t *testing.T) {
 			setup: func(er *MockEnvReader) {
 				er.vars["TMUX_DEVSPACE"] = "venus"
 			},
-			expectedText:   "♀ venus",
+			expectedText:   "♀ ven",
 			expectedSymbol: "♀",
 		},
 		{
@@ -238,7 +240,7 @@ func TestStatusline_GetDevspace(t *testing.T) {
 			setup: func(er *MockEnvReader) {
 				er.vars["TMUX_DEVSPACE"] = "earth"
 			},
-			expectedText:   "♁ earth",
+			expectedText:   "♁ ear",
 			expectedSymbol: "♁",
 		},
 		{
@@ -246,7 +248,7 @@ func TestStatusline_GetDevspace(t *testing.T) {
 			setup: func(er *MockEnvReader) {
 				er.vars["TMUX_DEVSPACE"] = "mars"
 			},
-			expectedText:   "♂ mars",
+			expectedText:   "♂ mar",
 			expectedSymbol: "♂",
 		},
 		{
@@ -254,11 +256,19 @@ func TestStatusline_GetDevspace(t *testing.T) {
 			setup: func(er *MockEnvReader) {
 				er.vars["TMUX_DEVSPACE"] = "jupiter"
 			},
-			expectedText:   "♃ jupiter",
+			expectedText:   "♃ jup",
 			expectedSymbol: "♃",
 		},
 		{
-			name: "custom devspace",
+			name: "arbitrary devspace under 3 chars stays full",
+			setup: func(er *MockEnvReader) {
+				er.vars["TMUX_DEVSPACE"] = "qa"
+			},
+			expectedText:   "● qa",
+			expectedSymbol: "●",
+		},
+		{
+			name: "arbitrary devspace keeps full name (not truncated)",
 			setup: func(er *MockEnvReader) {
 				er.vars["TMUX_DEVSPACE"] = "project-dev"
 			},

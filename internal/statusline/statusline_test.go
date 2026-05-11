@@ -451,11 +451,13 @@ func TestDevspace(t *testing.T) {
 		expectedText   string
 		expectedSymbol string
 	}{
-		{"mercury", "☿ mercury", "☿"},
-		{"venus", "♀ venus", "♀"},
-		{"earth", "♁ earth", "♁"},
-		{"mars", "♂ mars", "♂"},
-		{"jupiter", "♃ jupiter", "♃"},
+		// Planet labels truncate to 3 chars (glyph carries identity).
+		// Arbitrary names keep full text since the name IS the identifier.
+		{"mercury", "☿ mer", "☿"},
+		{"venus", "♀ ven", "♀"},
+		{"earth", "♁ ear", "♁"},
+		{"mars", "♂ mar", "♂"},
+		{"jupiter", "♃ jup", "♃"},
 		{"custom", "● custom", "●"},
 		{"", "", ""},
 	}
