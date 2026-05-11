@@ -97,10 +97,14 @@ func TestRenderClouds_LeadingChevronFromSky(t *testing.T) {
 	r, _ := aliases.NewResolver("")
 	deps := newCloudsDeps(t, map[string]string{"AWS_PROFILE": "personal"}, nil, r)
 	out := RenderClouds(deps)
-	// Leading chevron should have sky FG (transitioning from git's color).
-	skyFG := (CatppuccinMocha{}).SkyFG()
-	if !strings.Contains(out, skyFG) {
-		t.Errorf("leading chevron should use sky fg (git → aws transition); got %q", out)
+	// The leading chevron transitions from git (sky) → first cloud chip.
+	// Convention: bg = previous color, fg = next color. The triangle is
+	// drawn in the next chip's color over a sky-colored background, so
+	// the visible powerline reads as the AWS chip's color "encroaching
+	// back into" the sky-bg of git.
+	skyBG := (CatppuccinMocha{}).SkyBG()
+	if !strings.Contains(out, skyBG) {
+		t.Errorf("leading chevron should have sky BG (continuation from git); got %q", out)
 	}
 }
 

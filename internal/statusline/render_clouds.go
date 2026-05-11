@@ -50,9 +50,15 @@ func (s *Statusline) renderChainAfter(prevColor string, chips []Component) strin
 	sb.Grow(len(chips) * bytesPerChip)
 	prev := prevColor
 	for _, chip := range chips {
-		// Transition chevron: fg = prev chip's color, bg = this chip's color.
-		sb.WriteString(s.getColorBG(chip.Color))
-		sb.WriteString(s.getColorFG(prev))
+		// Transition chevron: bg = previous chip's color, fg = THIS chip's
+		// color. The chevron triangle is drawn in the next chip's color
+		// over the previous chip's background — matching starship's
+		// convention and renderComponentSeparator. Reversing fg/bg here
+		// would draw the triangle in the wrong color and the transition
+		// would look like the prev color was "pushing forward" instead
+		// of the next color "encroaching back".
+		sb.WriteString(s.getColorBG(prev))
+		sb.WriteString(s.getColorFG(chip.Color))
 		sb.WriteString(RightChevron)
 		sb.WriteString(s.colors.NC())
 
