@@ -189,12 +189,9 @@ func (s *Statusline) computeData(currentDir string) *CachedData {
 		ModelID:        s.input.Model.ID,
 	}
 
-	// Model display name
-	if s.input.Model.DisplayName != "" {
-		data.ModelDisplay = s.input.Model.DisplayName
-	} else {
-		data.ModelDisplay = "Claude"
-	}
+	// Model display name (abbreviated to first-letter + version, e.g.
+	// "Sonnet 4.6 (1M Context)" → "S4.6").
+	data.ModelDisplay = abbreviateModel(s.input.Model.DisplayName)
 
 	// Git information
 	gitInfo := s.getGitInfo(currentDir)

@@ -7,6 +7,36 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+func TestContextBar_NoLabelWord(t *testing.T) {
+	deps := &Dependencies{
+		FileReader:    &MockFileReader{},
+		CommandRunner: &MockCommandRunner{},
+		EnvReader:     &MockEnvReader{vars: make(map[string]string)},
+		TerminalWidth: &MockTerminalWidth{width: 200},
+	}
+	s := CreateStatusline(deps)
+	data := &CachedData{
+		ModelDisplay:   "S4.6",
+		CurrentDir:     "/home/user",
+		TermWidth:      200,
+		UsedPercentage: 42.0,
+	}
+	result := s.Render(data)
+	stripped := stripAnsi(result)
+
+	if strings.Contains(stripped, "Context") {
+		t.Errorf("rendered output should not contain the literal 'Context' label (epic R8); got %q", stripped)
+	}
+	// Icon must still appear so the bar is identifiable.
+	if !strings.Contains(stripped, ContextIcon) {
+		t.Errorf("rendered output should contain the context icon; got %q", stripped)
+	}
+	// Percentage must appear.
+	if !strings.Contains(stripped, "42.0%") {
+		t.Errorf("rendered output should contain '42.0%%'; got %q", stripped)
+	}
+}
+
 func TestContextBarPadding(t *testing.T) {
 	deps := &Dependencies{
 		FileReader:    &MockFileReader{},
@@ -26,14 +56,16 @@ func TestContextBarPadding(t *testing.T) {
 
 		result := s.Render(data)
 
-		// Find the context bar portion (between the left and right sections)
-		// The context bar should have "Context" text in it
-		if strings.Contains(result, "Context") {
+		// Find the context bar portion (between the left and right sections).
+		// After the label drop (epic R8), the bar starts with the
+		// ContextIcon glyph followed directly by the percentage. The
+		// literal "Context " word is no longer rendered.
+		if strings.Contains(result, ContextIcon) {
 			// Strip ANSI codes to analyze spacing
 			stripped := stripAnsi(result)
 
-			// Find where "Context" appears
-			contextIndex := strings.Index(stripped, "Context")
+			// Find where the icon appears
+			contextIndex := strings.Index(stripped, ContextIcon)
 			if contextIndex == -1 {
 				t.Error("Context bar should be visible with UsedPercentage > 0")
 				return
@@ -111,7 +143,7 @@ func TestContextBarPadding(t *testing.T) {
 					t.Errorf("Width mismatch: got %d, want %d", width, expectedWidth)
 				}
 
-				if strings.Contains(result, "Context") {
+				if strings.Contains(result, ContextIcon) {
 					t.Logf("Context bar visible at width %d", tc.termWidth)
 				} else if tc.minBarWidth > 0 {
 					t.Logf("Context bar not shown at width %d (might be too narrow)", tc.termWidth)
@@ -149,7 +181,7 @@ func TestContextBarPadding(t *testing.T) {
 
 		// Context bar should not appear if there isn't enough space with padding
 		// (needs at least 15 chars after 8 chars of padding)
-		if strings.Contains(result, "Context") {
+		if strings.Contains(result, ContextIcon) {
 			// If it does appear, verify it still has proper structure
 			t.Log("Context bar appeared even in very narrow terminal")
 

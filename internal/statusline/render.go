@@ -406,7 +406,7 @@ type contextBarInfo struct {
 }
 
 func (s *Statusline) prepareContextBarInfo(percentage float64, availableForBar int) contextBarInfo {
-	label := ContextIcon + "Context "
+	label := ContextIcon
 	percentText := fmt.Sprintf(" %.1f%%", percentage)
 	textLength := runewidth.StringWidth(label) + runewidth.StringWidth(percentText)
 

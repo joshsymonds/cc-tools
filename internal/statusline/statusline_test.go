@@ -200,7 +200,7 @@ func TestStatuslineGenerate(t *testing.T) {
 				}
 			},
 			contains: []string{
-				"Context", // Context bar should be visible
+				ContextIcon, // Context bar should be visible
 			},
 		},
 		{
@@ -371,22 +371,22 @@ func TestContextBar(t *testing.T) {
 		{
 			percentage:    20.0, // 20% - green
 			barWidth:      50,
-			shouldContain: []string{"20.0%", "Context"},
+			shouldContain: []string{"20.0%", ContextIcon},
 		},
 		{
 			percentage:    50.0, // 50% - yellow
 			barWidth:      50,
-			shouldContain: []string{"50.0%", "Context"},
+			shouldContain: []string{"50.0%", ContextIcon},
 		},
 		{
 			percentage:    75.0, // 75% - peach
 			barWidth:      50,
-			shouldContain: []string{"75.0%", "Context"},
+			shouldContain: []string{"75.0%", ContextIcon},
 		},
 		{
 			percentage:    100.0, // 100% - red
 			barWidth:      50,
-			shouldContain: []string{"100.0%", "Context"},
+			shouldContain: []string{"100.0%", ContextIcon},
 		},
 	}
 
