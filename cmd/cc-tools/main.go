@@ -45,6 +45,8 @@ func main() {
 		runConfigCommand()
 	case "resolve":
 		runResolveCommand()
+	case "render-clouds":
+		runRenderCloudsCommand()
 	case "version":
 		// Print version to stdout as intended output
 		out.Raw(fmt.Sprintf("cc-tools %s\n", version))
@@ -69,6 +71,7 @@ Commands:
   mcp           Manage Claude MCP servers
   config        Manage configuration settings
   resolve       Look up alias label + env for a host/aws/k8s/gcloud value
+  render-clouds Emit AWS/gcloud/k8s chip chain as ANSI (for starship)
   version       Print version information
   help          Show this help message
 
