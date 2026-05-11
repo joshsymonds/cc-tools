@@ -181,6 +181,89 @@ label = "uv"
 	}
 }
 
+func TestGcloudChip_ProdPink(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	comp := s.createGcloudComponent("acme-prod-project", 25)
+	if comp.Color != "pink" {
+		t.Errorf("prod gcloud should be pink, got %q", comp.Color)
+	}
+	if !strings.Contains(comp.Text, "acme-prod-project") {
+		t.Errorf("chip text should contain project name, got %q", comp.Text)
+	}
+}
+
+func TestGcloudChip_StagingMauve(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	comp := s.createGcloudComponent("acme-staging-project", 25)
+	if comp.Color != "mauve" {
+		t.Errorf("staging gcloud should be mauve, got %q", comp.Color)
+	}
+}
+
+func TestGcloudChip_DevSapphire(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	comp := s.createGcloudComponent("acme-dev-project", 25)
+	if comp.Color != "sapphire" {
+		t.Errorf("dev gcloud should be sapphire, got %q", comp.Color)
+	}
+}
+
+func TestGcloudChip_UnknownLavender(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	comp := s.createGcloudComponent("klover-loan-application", 25)
+	if comp.Color != "lavender" {
+		t.Errorf("unknown gcloud should be lavender, got %q", comp.Color)
+	}
+}
+
+func TestGcloudChip_AliasLabelAndEnv(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, `
+[gcloud."klover-loan-application"]
+label = "klover"
+env = "prod"
+`))
+	comp := s.createGcloudComponent("klover-loan-application", 25)
+	if !strings.Contains(comp.Text, "klover") {
+		t.Errorf("chip should show alias label, got %q", comp.Text)
+	}
+	if comp.Color != "pink" {
+		t.Errorf("explicit env=prod should be pink, got %q", comp.Color)
+	}
+}
+
+func TestGcloudChip_OrderBetweenAwsAndK8s(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	data := &CachedData{
+		Hostname:      "host",
+		GitBranch:     "main",
+		GcloudProject: "my-project",
+		K8sContext:    "my-cluster",
+		TermWidth:     240,
+	}
+	comps := s.collectRightComponents(data, "my-aws-profile", componentMaxLengths{
+		hostname: 20, branch: 25, aws: 20, gcloud: 20, k8s: 20, devspace: 15,
+	})
+	// Find AWS, gcloud, k8s chip indices.
+	idxAws, idxGcloud, idxK8s := -1, -1, -1
+	for i, c := range comps {
+		switch {
+		case strings.Contains(c.Text, "my-aws-profile"):
+			idxAws = i
+		case strings.Contains(c.Text, "my-project"):
+			idxGcloud = i
+		case strings.Contains(c.Text, "my-cluster"):
+			idxK8s = i
+		}
+	}
+	if idxAws < 0 || idxGcloud < 0 || idxK8s < 0 {
+		t.Fatalf("expected aws, gcloud, and k8s chips; got order: %s", colorChain(comps))
+	}
+	if !(idxAws < idxGcloud && idxGcloud < idxK8s) {
+		t.Errorf("expected order aws(%d) < gcloud(%d) < k8s(%d); chain=%s",
+			idxAws, idxGcloud, idxK8s, colorChain(comps))
+	}
+}
+
 func TestHostnameChip_FallbackToRaw(t *testing.T) {
 	s := newTestStatusline(t, newTestResolver(t, ""))
 	data := &CachedData{Hostname: "vermissian", TermWidth: 240}

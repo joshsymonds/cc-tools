@@ -16,6 +16,8 @@ const (
 	AwsIcon = " "
 	// K8sIcon is the icon for Kubernetes context display.
 	K8sIcon = "☸ "
+	// GcloudIcon is the icon for gcloud project display.
+	GcloudIcon = "󱇶 "
 	// DevspaceIcon is the icon for devspace display (set dynamically).
 	DevspaceIcon = "" // Will be set based on devspace name
 	// HostnameIcon is the icon for hostname display.

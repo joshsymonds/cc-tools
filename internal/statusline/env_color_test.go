@@ -23,6 +23,23 @@ func TestAwsBgColor(t *testing.T) {
 	}
 }
 
+func TestGcloudBgColor(t *testing.T) {
+	cases := []struct {
+		env  aliases.Env
+		want string
+	}{
+		{aliases.EnvProd, "pink"},
+		{aliases.EnvStaging, "mauve"},
+		{aliases.EnvDev, "sapphire"},
+		{aliases.EnvUnknown, "lavender"},
+	}
+	for _, c := range cases {
+		if got := gcloudBgColor(c.env); got != c.want {
+			t.Errorf("gcloudBgColor(%s) = %q, want %q", c.env, got, c.want)
+		}
+	}
+}
+
 func TestK8sBgColor(t *testing.T) {
 	cases := []struct {
 		env  aliases.Env

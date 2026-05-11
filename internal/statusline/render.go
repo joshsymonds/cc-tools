@@ -173,6 +173,7 @@ type componentMaxLengths struct {
 	hostname int
 	branch   int
 	aws      int
+	gcloud   int
 	k8s      int
 	devspace int
 }
@@ -182,6 +183,7 @@ func (s *Statusline) getRightSectionMaxLengths() componentMaxLengths {
 		maxHostname = 20
 		maxBranch   = 25
 		maxAWS      = 20
+		maxGcloud   = 20
 		maxK8s      = 20
 		maxDevspace = 15
 	)
@@ -190,6 +192,7 @@ func (s *Statusline) getRightSectionMaxLengths() componentMaxLengths {
 		hostname: maxHostname,
 		branch:   maxBranch,
 		aws:      maxAWS,
+		gcloud:   maxGcloud,
 		k8s:      maxK8s,
 		devspace: maxDevspace,
 	}
@@ -209,6 +212,9 @@ func (s *Statusline) countRightComponents(data *CachedData, awsProfile string) i
 	if awsProfile != "" {
 		count++
 	}
+	if data.GcloudProject != "" {
+		count++
+	}
 	if data.K8sContext != "" {
 		count++
 	}
@@ -223,23 +229,24 @@ func (s *Statusline) adjustComponentMaxLengths(
 		minHostnameLen = 8
 		minBranchLen   = 10
 		minAwsLen      = 8
+		minGcloudLen   = 8
 		minK8sLen      = 8
 		minDevspaceLen = 6
 	)
 
-	hostnameMaxLen, branchMaxLen, awsMaxLen, k8sMaxLen, devspaceMaxLen := s.calculateComponentSizes(
+	sizes := s.calculateComponentSizes(
 		componentCount, availableWidth,
-		maxLengths.hostname, maxLengths.branch, maxLengths.aws, maxLengths.k8s, maxLengths.devspace,
-		minHostnameLen, minBranchLen, minAwsLen, minK8sLen, minDevspaceLen,
+		maxLengths, componentMaxLengths{
+			hostname: minHostnameLen,
+			branch:   minBranchLen,
+			aws:      minAwsLen,
+			gcloud:   minGcloudLen,
+			k8s:      minK8sLen,
+			devspace: minDevspaceLen,
+		},
 	)
 
-	return componentMaxLengths{
-		hostname: hostnameMaxLen,
-		branch:   branchMaxLen,
-		aws:      awsMaxLen,
-		k8s:      k8sMaxLen,
-		devspace: devspaceMaxLen,
-	}
+	return sizes
 }
 
 func (s *Statusline) collectRightComponents(
@@ -266,6 +273,10 @@ func (s *Statusline) collectRightComponents(
 
 	if awsProfile != "" {
 		components = append(components, s.createAwsComponent(awsProfile, maxLengths.aws))
+	}
+
+	if data.GcloudProject != "" {
+		components = append(components, s.createGcloudComponent(data.GcloudProject, maxLengths.gcloud))
 	}
 
 	if data.K8sContext != "" {
@@ -295,6 +306,12 @@ func (s *Statusline) createK8sComponent(k8sContext string, maxLen int) Component
 	label, env := s.deps.Resolver.Resolve(aliases.KindK8s, k8sContext)
 	label = truncateText(label, maxLen)
 	return Component{k8sBgColor(env), K8sIcon + label}
+}
+
+func (s *Statusline) createGcloudComponent(project string, maxLen int) Component {
+	label, env := s.deps.Resolver.Resolve(aliases.KindGcloud, project)
+	label = truncateText(label, maxLen)
+	return Component{gcloudBgColor(env), GcloudIcon + label}
 }
 
 func (s *Statusline) renderComponents(components []Component) string {
@@ -578,9 +595,8 @@ func (s *Statusline) scaleDownProportionally(
 
 func (s *Statusline) calculateComponentSizes(
 	componentCount, availableForRight int,
-	hostnameMaxLen, branchMaxLen, awsMaxLen, k8sMaxLen, devspaceMaxLen int,
-	minHostnameLen, minBranchLen, minAwsLen, minK8sLen, minDevspaceLen int,
-) (int, int, int, int, int) {
+	maxLengths, minLengths componentMaxLengths,
+) componentMaxLengths {
 	// Reserve space for separators, curves, spaces, and icons
 	const (
 		perComponentOverhead = 5
@@ -591,43 +607,47 @@ func (s *Statusline) calculateComponentSizes(
 	availableForText := availableForRight - overhead
 
 	if availableForText < minAvailableForText {
-		// Very constrained - use minimum sizes
-		return minHostnameLen, minBranchLen, minAwsLen, minK8sLen, minDevspaceLen
+		return minLengths
 	}
 
-	totalNeeded := hostnameMaxLen + branchMaxLen + awsMaxLen + k8sMaxLen + devspaceMaxLen
+	totalNeeded := maxLengths.hostname + maxLengths.branch + maxLengths.aws +
+		maxLengths.gcloud + maxLengths.k8s + maxLengths.devspace
 	if availableForText < totalNeeded {
-		// Scale down proportionally
 		perComponent := availableForText / componentCount
 		return s.ensureMinimumSizes(
-			perComponent, perComponent, perComponent, perComponent, perComponent,
-			minHostnameLen, minBranchLen, minAwsLen, minK8sLen, minDevspaceLen,
+			componentMaxLengths{
+				hostname: perComponent, branch: perComponent, aws: perComponent,
+				gcloud: perComponent, k8s: perComponent, devspace: perComponent,
+			},
+			minLengths,
 		)
 	}
 
-	return hostnameMaxLen, branchMaxLen, awsMaxLen, k8sMaxLen, devspaceMaxLen
+	return maxLengths
 }
 
 func (s *Statusline) ensureMinimumSizes(
-	hostnameMaxLen, branchMaxLen, awsMaxLen, k8sMaxLen, devspaceMaxLen int,
-	minHostnameLen, minBranchLen, minAwsLen, minK8sLen, minDevspaceLen int,
-) (int, int, int, int, int) {
-	if hostnameMaxLen < minHostnameLen {
-		hostnameMaxLen = minHostnameLen
+	sizes, minLengths componentMaxLengths,
+) componentMaxLengths {
+	if sizes.hostname < minLengths.hostname {
+		sizes.hostname = minLengths.hostname
 	}
-	if branchMaxLen < minBranchLen {
-		branchMaxLen = minBranchLen
+	if sizes.branch < minLengths.branch {
+		sizes.branch = minLengths.branch
 	}
-	if awsMaxLen < minAwsLen {
-		awsMaxLen = minAwsLen
+	if sizes.aws < minLengths.aws {
+		sizes.aws = minLengths.aws
 	}
-	if k8sMaxLen < minK8sLen {
-		k8sMaxLen = minK8sLen
+	if sizes.gcloud < minLengths.gcloud {
+		sizes.gcloud = minLengths.gcloud
 	}
-	if devspaceMaxLen < minDevspaceLen {
-		devspaceMaxLen = minDevspaceLen
+	if sizes.k8s < minLengths.k8s {
+		sizes.k8s = minLengths.k8s
 	}
-	return hostnameMaxLen, branchMaxLen, awsMaxLen, k8sMaxLen, devspaceMaxLen
+	if sizes.devspace < minLengths.devspace {
+		sizes.devspace = minLengths.devspace
+	}
+	return sizes
 }
 
 func (s *Statusline) getTermWidth(data *CachedData) int {

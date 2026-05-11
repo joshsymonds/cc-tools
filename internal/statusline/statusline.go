@@ -52,6 +52,7 @@ type CachedData struct {
 	GitBranch      string
 	GitStatus      string
 	K8sContext     string
+	GcloudProject  string
 	UsedPercentage float64
 	Hostname       string
 	Devspace       string
@@ -202,6 +203,9 @@ func (s *Statusline) computeData(currentDir string) *CachedData {
 
 	// Kubernetes context
 	data.K8sContext = s.getK8sContext()
+
+	// Gcloud project
+	data.GcloudProject = s.getGcloudProject()
 
 	// Context window percentage (directly from input)
 	data.UsedPercentage = s.input.ContextWindow.UsedPercentage
@@ -393,6 +397,12 @@ func (s *Statusline) getColorBG(color string) string {
 		return s.colors.YellowBG()
 	case "green":
 		return s.colors.GreenBG()
+	case "lavender":
+		return s.colors.LavenderBG()
+	case "pink":
+		return s.colors.PinkBG()
+	case "sapphire":
+		return s.colors.SapphireBG()
 	default:
 		return ""
 	}
@@ -418,6 +428,12 @@ func (s *Statusline) getColorFG(color string) string {
 		return s.colors.YellowFG()
 	case "green":
 		return s.colors.GreenFG()
+	case "lavender":
+		return s.colors.LavenderFG()
+	case "pink":
+		return s.colors.PinkFG()
+	case "sapphire":
+		return s.colors.SapphireFG()
 	default:
 		return ""
 	}

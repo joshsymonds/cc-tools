@@ -19,6 +19,26 @@ func awsBgColor(env aliases.Env) string {
 	}
 }
 
+// gcloudBgColor returns the chip background color name for a gcloud project's env.
+// Matches epic R3: lavender (unknown), pink (prod), mauve (staging), sapphire (dev).
+// These colors are reused from other chip positions but the adjacency invariant
+// (R9) keeps them safe: gcloud sits between aws and k8s, neither of which uses
+// these values.
+func gcloudBgColor(env aliases.Env) string {
+	switch env {
+	case aliases.EnvProd:
+		return "pink"
+	case aliases.EnvStaging:
+		return "mauve"
+	case aliases.EnvDev:
+		return "sapphire"
+	case aliases.EnvUnknown:
+		return "lavender"
+	default:
+		return "lavender"
+	}
+}
+
 // k8sBgColor returns the chip background color name for a k8s context's env.
 // Matches epic R4: teal (unknown), maroon (prod), yellow (staging), teal (dev).
 // Dev shares teal with unknown by design.
