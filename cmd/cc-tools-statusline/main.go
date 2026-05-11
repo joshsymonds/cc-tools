@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Veraticus/cc-tools/internal/aliases"
 	"github.com/Veraticus/cc-tools/internal/output"
 	"github.com/Veraticus/cc-tools/internal/statusline"
 )
@@ -37,11 +38,20 @@ func main() {
 }
 
 func runStatuslineWithInput(reader io.Reader) (string, error) {
+	resolver, resolverErr := aliases.NewResolver(aliases.DefaultPath())
+	if resolverErr != nil {
+		fmt.Fprintf(os.Stderr, "cc-tools-statusline: alias file parse error: %v\n", resolverErr)
+		// Continue with an empty resolver — better to render with raw labels
+		// than to crash the prompt.
+		resolver, _ = aliases.NewResolver("")
+	}
+
 	deps := &statusline.Dependencies{
 		FileReader:    &statusline.DefaultFileReader{},
 		CommandRunner: &statusline.DefaultCommandRunner{},
 		EnvReader:     &statusline.DefaultEnvReader{},
 		TerminalWidth: &statusline.DefaultTerminalWidth{},
+		Resolver:      resolver,
 		CacheDir:      getCacheDir(),
 		CacheDuration: getCacheDuration(),
 	}

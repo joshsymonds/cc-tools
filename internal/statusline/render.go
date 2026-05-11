@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Veraticus/cc-tools/internal/aliases"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -254,7 +255,8 @@ func (s *Statusline) collectRightComponents(
 	}
 
 	if data.Hostname != "" {
-		hostname := truncateText(data.Hostname, maxLengths.hostname)
+		hostLabel, _ := s.deps.Resolver.Resolve(aliases.KindHost, data.Hostname)
+		hostname := truncateText(hostLabel, maxLengths.hostname)
 		components = append(components, Component{"rosewater", HostnameIcon + hostname})
 	}
 
@@ -284,16 +286,15 @@ func (s *Statusline) createGitComponent(data *CachedData, maxLen int) Component 
 
 func (s *Statusline) createAwsComponent(awsProfile string, maxLen int) Component {
 	awsProfile = strings.TrimPrefix(awsProfile, "export AWS_PROFILE=")
-	awsProfile = truncateText(awsProfile, maxLen)
-	return Component{"peach", AwsIcon + awsProfile}
+	label, env := s.deps.Resolver.Resolve(aliases.KindAWS, awsProfile)
+	label = truncateText(label, maxLen)
+	return Component{awsBgColor(env), AwsIcon + label}
 }
 
 func (s *Statusline) createK8sComponent(k8sContext string, maxLen int) Component {
-	k8s := k8sContext
-	k8s = strings.TrimPrefix(k8s, "arn:aws:eks:*:*:cluster/")
-	k8s = strings.TrimPrefix(k8s, "gke_*_*_")
-	k8s = truncateText(k8s, maxLen)
-	return Component{"teal", K8sIcon + k8s}
+	label, env := s.deps.Resolver.Resolve(aliases.KindK8s, k8sContext)
+	label = truncateText(label, maxLen)
+	return Component{k8sBgColor(env), K8sIcon + label}
 }
 
 func (s *Statusline) renderComponents(components []Component) string {

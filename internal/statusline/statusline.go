@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Veraticus/cc-tools/internal/aliases"
 )
 
 // Input represents the JSON input from stdin.
@@ -63,6 +65,7 @@ type Dependencies struct {
 	CommandRunner CommandRunner
 	EnvReader     EnvReader
 	TerminalWidth TerminalWidth
+	Resolver      *aliases.Resolver
 	CacheDir      string
 	CacheDuration time.Duration
 }
@@ -125,6 +128,11 @@ func CreateStatusline(deps *Dependencies) *Statusline {
 func NewWithConfig(deps *Dependencies, config *Config) *Statusline {
 	if config == nil {
 		config = DefaultConfig()
+	}
+	if deps != nil && deps.Resolver == nil {
+		// Zero-value resolver: behaves identically to a missing alias file —
+		// raw labels, default env patterns. Keeps test ergonomics simple.
+		deps.Resolver, _ = aliases.NewResolver("")
 	}
 	return &Statusline{
 		deps:   deps,
@@ -377,6 +385,14 @@ func (s *Statusline) getColorBG(color string) string {
 		return s.colors.PeachBG()
 	case "teal":
 		return s.colors.TealBG()
+	case "red":
+		return s.colors.RedBG()
+	case "maroon":
+		return s.colors.MaroonBG()
+	case "yellow":
+		return s.colors.YellowBG()
+	case "green":
+		return s.colors.GreenBG()
 	default:
 		return ""
 	}
@@ -394,6 +410,14 @@ func (s *Statusline) getColorFG(color string) string {
 		return s.colors.PeachFG()
 	case "teal":
 		return s.colors.TealFG()
+	case "red":
+		return s.colors.RedFG()
+	case "maroon":
+		return s.colors.MaroonFG()
+	case "yellow":
+		return s.colors.YellowFG()
+	case "green":
+		return s.colors.GreenFG()
 	default:
 		return ""
 	}

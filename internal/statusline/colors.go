@@ -30,6 +30,9 @@ func (c CatppuccinMocha) TealBG() string { return "\033[48;2;148;226;213m" } // 
 // RedBG returns red background color.
 func (c CatppuccinMocha) RedBG() string { return "\033[48;2;243;139;168m" } // #f38ba8
 
+// MaroonBG returns maroon background color.
+func (c CatppuccinMocha) MaroonBG() string { return "\033[48;2;235;160;172m" } // #eba0ac
+
 // LavenderFG returns lavender foreground color.
 func (c CatppuccinMocha) LavenderFG() string { return "\033[38;2;180;190;254m" } // #b4befe
 
@@ -56,6 +59,9 @@ func (c CatppuccinMocha) TealFG() string { return "\033[38;2;148;226;213m" } // 
 
 // RedFG returns red foreground color.
 func (c CatppuccinMocha) RedFG() string { return "\033[38;2;243;139;168m" } // #f38ba8
+
+// MaroonFG returns maroon foreground color.
+func (c CatppuccinMocha) MaroonFG() string { return "\033[38;2;235;160;172m" } // #eba0ac
 
 // BaseFG returns base foreground color (dark text on colored backgrounds).
 func (c CatppuccinMocha) BaseFG() string { return "\033[38;2;30;30;46m" } // #1e1e2e
