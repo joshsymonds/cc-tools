@@ -20,7 +20,7 @@
         buildTime = "1970-01-01T00:00:00Z";
 
         # Update this hash after running: nix build . --no-link 2>&1 | grep 'got:' | cut -d: -f2 | xargs
-        vendorHash = "sha256-+4bH5wmy1PoIK+RXXd9lFDqTHXbpMmoOM9QLilg0oWQ=";
+        vendorHash = "sha256-epbCqJabBV3I6n8TT0CKdH38XLFxeBR6VOX+JKhDY7A=";
 
         cc-tools-main = pkgs.buildGoModule rec {
           pname = "cc-tools";

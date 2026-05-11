@@ -42,6 +42,8 @@ func main() {
 		runMCPCommand()
 	case "config":
 		runConfigCommand()
+	case "resolve":
+		runResolveCommand()
 	case "version":
 		// Print version to stdout as intended output
 		out.Raw(fmt.Sprintf("cc-tools %s\n", version))
@@ -65,6 +67,7 @@ Commands:
   debug         Configure debug logging for directories
   mcp           Manage Claude MCP servers
   config        Manage configuration settings
+  resolve       Look up alias label + env for a host/aws/k8s/gcloud value
   version       Print version information
   help          Show this help message
 
@@ -72,6 +75,7 @@ Examples:
   echo '{"cwd": "/path"}' | cc-tools statusline
   cc-tools mcp list
   cc-tools mcp enable jira
+  cc-tools resolve --type=k8s --raw="arn:aws:eks:us-east-1:123:cluster/prod"
 `)
 }
 
