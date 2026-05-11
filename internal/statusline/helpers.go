@@ -43,13 +43,14 @@ func formatPath(path string) string {
 		}
 	}
 
-	// If path is longer than 3 directories, truncate with …
+	// If path is longer than 3 directories, truncate with `…/`.
+	// We intentionally drop the `~` prefix on truncation so the cc-tools
+	// statusline matches starship's directory module byte-for-byte
+	// (starship's truncation_length=2 + truncation_symbol="…/" yields the
+	// same shape). The slight info loss (you can't tell from the chip
+	// alone whether you're under $HOME) is acceptable for line parity.
 	const maxDisplayedParts = 3
 	if nonEmptyParts > maxDisplayedParts {
-		// Keep first part (~ or /), last 2 parts
-		if len(parts) > 0 && parts[0] == "~" {
-			return fmt.Sprintf("~/%s/%s", parts[len(parts)-2], parts[len(parts)-1])
-		}
 		return fmt.Sprintf("…/%s/%s", parts[len(parts)-2], parts[len(parts)-1])
 	}
 

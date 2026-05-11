@@ -287,7 +287,9 @@ func TestFormatPath(t *testing.T) {
 		expected string
 	}{
 		{"/home/user/project", "/home/user", "~/project"},
-		{"/home/user/a/b/c/d", "/home/user", "~/c/d"},
+		// Once truncated, the home indicator drops to `…/` to match
+		// starship's directory truncation behavior on the prompt line.
+		{"/home/user/a/b/c/d", "/home/user", "…/c/d"},
 		{"/usr/local/bin", "/home/user", "/usr/local/bin"},
 		{"/a/b/c/d/e/f", "/home/user", "…/e/f"},
 	}
