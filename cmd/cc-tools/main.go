@@ -108,18 +108,12 @@ func runStatusline() {
 }
 
 func runStatuslineWithInput(reader io.Reader) (string, error) {
-	resolver, resolverErr := aliases.NewResolver(aliases.DefaultPath())
-	if resolverErr != nil {
-		fmt.Fprintf(os.Stderr, "cc-tools statusline: alias file parse error: %v\n", resolverErr)
-		resolver, _ = aliases.NewResolver("")
-	}
-
 	deps := &statusline.Dependencies{
 		FileReader:    &statusline.DefaultFileReader{},
 		CommandRunner: &statusline.DefaultCommandRunner{},
 		EnvReader:     &statusline.DefaultEnvReader{},
 		TerminalWidth: &statusline.DefaultTerminalWidth{},
-		Resolver:      resolver,
+		Resolver:      aliases.NewResolverFromDefaultPath(os.Stderr, "cc-tools statusline"),
 		CacheDir:      getCacheDir(),
 		CacheDuration: getCacheDuration(),
 	}

@@ -142,6 +142,21 @@ func TestResolve_EmptyRaw(t *testing.T) {
 	}
 }
 
+func TestResolve_EmptyEnvPatternsFallsBackToDefaults(t *testing.T) {
+	// An explicit empty `[env_patterns]` table — no keys defined —
+	// silently falls back to the built-in defaults. This pins the
+	// current behavior: empty-but-present means "I didn't override,"
+	// not "I want zero patterns." Override that means "zero patterns"
+	// is unsupported by design.
+	r := mustResolver(t, `
+[env_patterns]
+`)
+	_, env := r.Resolve(KindAWS, "acme-prod-admin")
+	if env != EnvProd {
+		t.Errorf("empty [env_patterns] should fall back to default patterns; got %s, want prod", env)
+	}
+}
+
 func TestResolve_CustomEnvPatterns(t *testing.T) {
 	r := mustResolver(t, `
 [env_patterns]

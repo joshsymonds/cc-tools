@@ -14,7 +14,7 @@ import "strings"
 func RenderClouds(deps *Dependencies) string {
 	s := CreateStatusline(deps)
 
-	awsProfile := strings.TrimPrefix(s.deps.EnvReader.Get("AWS_PROFILE"), "export AWS_PROFILE=")
+	awsProfile := awsProfileFromEnv(s.deps.EnvReader)
 	k8sContext := s.getK8sContext()
 	gcloudProject := s.getGcloudProject()
 
@@ -44,6 +44,10 @@ func (s *Statusline) renderChainAfter(prevColor string, chips []Component) strin
 	}
 
 	var sb strings.Builder
+	// Each chip emits ~80 bytes of ANSI + text; pre-size to skip the
+	// usual 2-3 small reallocations.
+	const bytesPerChip = 80
+	sb.Grow(len(chips) * bytesPerChip)
 	prev := prevColor
 	for _, chip := range chips {
 		// Transition chevron: fg = prev chip's color, bg = this chip's color.

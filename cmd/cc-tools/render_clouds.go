@@ -21,18 +21,12 @@ import (
 // color), so the right side of the prompt seals correctly even when no
 // cloud chips are present.
 func runRenderCloudsCommand() {
-	resolver, err := aliases.NewResolver(aliases.DefaultPath())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "cc-tools render-clouds: %v\n", err)
-		resolver, _ = aliases.NewResolver("")
-	}
-
 	deps := &statusline.Dependencies{
 		FileReader:    &statusline.DefaultFileReader{},
 		CommandRunner: &statusline.DefaultCommandRunner{},
 		EnvReader:     &statusline.DefaultEnvReader{},
 		TerminalWidth: &statusline.DefaultTerminalWidth{},
-		Resolver:      resolver,
+		Resolver:      aliases.NewResolverFromDefaultPath(os.Stderr, "cc-tools render-clouds"),
 	}
 
 	fmt.Print(statusline.RenderClouds(deps))

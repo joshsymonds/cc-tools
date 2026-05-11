@@ -1,6 +1,8 @@
 package statusline
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -301,13 +303,16 @@ func (s *Statusline) getK8sContext() string {
 		return ""
 	}
 
-	// Extract current-context from YAML
-	lines := strings.Split(string(content), "\n")
-	for _, line := range lines {
+	// Scan line-by-line with early exit. The file is read whole via the
+	// FileReader contract, but we avoid allocating a slice of every line
+	// via strings.Split — meaningful on hot-path renders with long
+	// kubeconfigs.
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	for scanner.Scan() {
+		line := scanner.Text()
 		if strings.HasPrefix(line, "current-context:") {
 			context := strings.TrimSpace(strings.TrimPrefix(line, "current-context:"))
-			context = strings.Trim(context, "\"")
-			return context
+			return strings.Trim(context, "\"")
 		}
 	}
 

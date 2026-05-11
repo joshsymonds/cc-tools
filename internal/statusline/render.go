@@ -156,9 +156,17 @@ func (s *Statusline) buildLeftSection(
 	return sb.String()
 }
 
+// awsProfileFromEnv reads AWS_PROFILE and strips the literal
+// "export AWS_PROFILE=" prefix some misconfigured shells include.
+// Shared by render.go and render_clouds.go so both paths agree on
+// what the "profile value" is.
+func awsProfileFromEnv(r EnvReader) string {
+	return strings.TrimPrefix(r.Get("AWS_PROFILE"), "export AWS_PROFILE=")
+}
+
 func (s *Statusline) buildRightSection(data *CachedData, availableWidth int) string {
 	maxLengths := s.getRightSectionMaxLengths()
-	awsProfile := s.deps.EnvReader.Get("AWS_PROFILE")
+	awsProfile := awsProfileFromEnv(s.deps.EnvReader)
 	componentCount := s.countRightComponents(data, awsProfile)
 
 	if componentCount > 0 {
@@ -296,7 +304,7 @@ func (s *Statusline) createGitComponent(data *CachedData, maxLen int) Component 
 }
 
 func (s *Statusline) createAwsComponent(awsProfile string, maxLen int) Component {
-	awsProfile = strings.TrimPrefix(awsProfile, "export AWS_PROFILE=")
+	// awsProfile is already cleaned by awsProfileFromEnv in buildRightSection.
 	label, env := s.deps.Resolver.Resolve(aliases.KindAWS, awsProfile)
 	label = truncateText(label, maxLen)
 	return Component{awsBgColor(env), AwsIcon + label}

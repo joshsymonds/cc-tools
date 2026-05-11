@@ -137,17 +137,23 @@ env = "prod"
 	}
 }
 
-func TestAwsChip_StripsExportPrefix(t *testing.T) {
-	s := newTestStatusline(t, newTestResolver(t, ""))
-	comp := s.createAwsComponent("export AWS_PROFILE=acme-prod-admin", 30)
-	if strings.Contains(comp.Text, "export AWS_PROFILE=") {
-		t.Errorf("should strip 'export AWS_PROFILE=' prefix, got %q", comp.Text)
+func TestAwsProfileFromEnv_StripsExportPrefix(t *testing.T) {
+	// The strip happens in the env-read boundary (awsProfileFromEnv),
+	// not in createAwsComponent. This test pins that contract: a
+	// misconfigured shell setting AWS_PROFILE to the literal value
+	// "export AWS_PROFILE=foo" is normalized to just "foo" before
+	// any chip rendering happens.
+	er := NewMockEnvReader()
+	er.vars["AWS_PROFILE"] = "export AWS_PROFILE=acme-prod-admin"
+	got := awsProfileFromEnv(er)
+	if got != "acme-prod-admin" {
+		t.Errorf("awsProfileFromEnv should strip the export prefix; got %q", got)
 	}
-	if !strings.Contains(comp.Text, "acme-prod-admin") {
-		t.Errorf("should keep the value after the prefix, got %q", comp.Text)
-	}
-	if comp.Color != "red" {
-		t.Errorf("prod classification should still apply after strip, got %q", comp.Color)
+
+	// Plain values pass through unchanged.
+	er.vars["AWS_PROFILE"] = "personal"
+	if got := awsProfileFromEnv(er); got != "personal" {
+		t.Errorf("plain value should pass through; got %q", got)
 	}
 }
 

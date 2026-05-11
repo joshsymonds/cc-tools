@@ -10,6 +10,7 @@ package aliases
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -80,6 +81,34 @@ func DefaultPath() string {
 		base = filepath.Join(os.Getenv("HOME"), ".config")
 	}
 	return filepath.Join(base, "statusline-aliases", "aliases.toml")
+}
+
+// NewResolverFromDefaultPath builds a Resolver for the alias file at
+// DefaultPath. Designed for the statusline render paths that want
+// best-effort loading:
+//   - missing file: emits one stderr line ("X: PATH missing, using
+//     built-in patterns") and returns a no-table Resolver
+//   - parse error: emits one stderr line and returns a no-table Resolver
+//   - success: returns the parsed Resolver
+//
+// stderr is the destination for diagnostic output (typically os.Stderr);
+// prefix is the binary name used in messages so callers like cc-tools,
+// cc-tools-statusline, and render-clouds are distinguishable in logs.
+//
+// Use this from rendering paths only. Callers that need to fail loudly
+// on parse errors (e.g. the `cc-tools resolve` subcommand) should call
+// NewResolver directly.
+func NewResolverFromDefaultPath(stderr io.Writer, prefix string) *Resolver {
+	path := DefaultPath()
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(stderr, "%s: %s missing, using built-in patterns\n", prefix, path)
+	}
+	r, err := NewResolver(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: alias file parse error: %v\n", prefix, err)
+		r, _ = NewResolver("")
+	}
+	return r
 }
 
 // NewResolver loads the alias table from path. A missing file is not an
