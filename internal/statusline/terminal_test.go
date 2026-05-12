@@ -37,8 +37,8 @@ func TestDefaultTerminalWidth_GetWidth(t *testing.T) {
 			setupEnv: func(_ *testing.T) {
 				// t.Setenv automatically handles cleanup
 			},
-			minWidth: 80,  // Default fallback
-			maxWidth: 250, // Could get from terminal (increased to handle wider terminals)
+			minWidth: 80,   // Default fallback
+			maxWidth: 1000, // Could get from terminal (covers ultrawide displays)
 		},
 	}
 
