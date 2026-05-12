@@ -182,10 +182,11 @@ func GetLogFilePath(dir string) string {
 	dirHash := sha256.Sum256([]byte(absDir))
 	hashStr := hex.EncodeToString(dirHash[:8])
 
-	safeName := strings.ReplaceAll(filepath.Base(absDir), "/", "_")
-	if safeName == "" || safeName == "." {
+	safeName := filepath.Base(absDir)
+	if safeName == "" || safeName == "." || safeName == "/" {
 		safeName = "root"
 	}
+	safeName = strings.ReplaceAll(safeName, "/", "_")
 
 	return fmt.Sprintf("/tmp/cc-tools-%s-%s.log", safeName, hashStr)
 }
