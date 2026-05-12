@@ -325,12 +325,13 @@ func TestEnable(t *testing.T) {
 					},
 				},
 			},
-			checkCommand: func(t *testing.T, cmd string, args []string) {
-				// Check that ~/ was expanded
+			checkCommand: func(t *testing.T, _ string, args []string) {
+				// args is [mcp, add, name, command, ...serverArgs]; the
+				// expanded command is at index 3.
 				if len(args) < 4 {
 					t.Fatalf("Not enough args: %v", args)
 				}
-				commandPath := args[2]
+				commandPath := args[3]
 				if strings.Contains(commandPath, "~") {
 					t.Error("Command path should have ~ expanded")
 				}

@@ -12,78 +12,48 @@ import (
 func TestNewLogger(t *testing.T) {
 	ctx := context.Background()
 
+	// writeConfig redirects $HOME (and on darwin $XDG-style fallbacks) to a
+	// tempdir so that NewManager() — called inside NewLogger — sees the
+	// fixture's debug-config.json rather than the developer's real ~/.claude.
+	writeConfig := func(t *testing.T, enabled map[string]bool) {
+		t.Helper()
+		t.Setenv("HOME", t.TempDir())
+		m := NewManager()
+		m.config = &Config{EnabledDirs: enabled}
+		if err := m.Save(ctx); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
 	tests := []struct {
 		name        string
-		setupFunc   func(t *testing.T, workDir string) *Manager
+		setupFunc   func(t *testing.T, workDir string)
 		workDir     string
 		wantEnabled bool
 		wantErr     bool
 	}{
 		{
 			name: "creates enabled logger when debug is on",
-			setupFunc: func(t *testing.T, workDir string) *Manager {
-				tmpDir := t.TempDir()
-				configPath := filepath.Join(tmpDir, "debug-config.json")
-
+			setupFunc: func(t *testing.T, workDir string) {
 				absDir, _ := filepath.Abs(workDir)
-				m := &Manager{
-					filepath: configPath,
-					config: &Config{
-						EnabledDirs: map[string]bool{
-							absDir: true,
-						},
-					},
-				}
-				m.Save(ctx)
-
-				return m
+				writeConfig(t, map[string]bool{absDir: true})
 			},
 			workDir:     ".",
 			wantEnabled: true,
 		},
 		{
 			name: "creates disabled logger when debug is off",
-			setupFunc: func(t *testing.T, workDir string) *Manager {
-				tmpDir := t.TempDir()
-				configPath := filepath.Join(tmpDir, "debug-config.json")
-
-				m := &Manager{
-					filepath: configPath,
-					config: &Config{
-						EnabledDirs: map[string]bool{},
-					},
-				}
-				m.Save(ctx)
-
-				// Note: We can't override getConfigDir, but the Manager
-				// will use the config from our temporary directory
-
-				return m
+			setupFunc: func(t *testing.T, _ string) {
+				writeConfig(t, map[string]bool{})
 			},
 			workDir:     ".",
 			wantEnabled: false,
 		},
 		{
-			name: "creates disabled logger when parent directory is enabled",
-			setupFunc: func(t *testing.T, workDir string) *Manager {
-				tmpDir := t.TempDir()
-				configPath := filepath.Join(tmpDir, "debug-config.json")
-
+			name: "creates enabled logger when parent directory is enabled",
+			setupFunc: func(t *testing.T, workDir string) {
 				parentDir, _ := filepath.Abs(filepath.Dir(workDir))
-				m := &Manager{
-					filepath: configPath,
-					config: &Config{
-						EnabledDirs: map[string]bool{
-							parentDir: true,
-						},
-					},
-				}
-				m.Save(ctx)
-
-				// Note: We can't override getConfigDir, but the Manager
-				// will use the config from our temporary directory
-
-				return m
+				writeConfig(t, map[string]bool{parentDir: true})
 			},
 			workDir:     "./subdir",
 			wantEnabled: true,
@@ -544,8 +514,10 @@ func TestLoggerTimestampFormat(t *testing.T) {
 
 	timestamp := contentStr[start+1 : end]
 
-	// Parse the timestamp
-	parsed, err := time.Parse("2006-01-02 15:04:05.000", timestamp)
+	// Parse the timestamp in the logger's local zone (logger.go uses
+	// time.Now().Format(...), which is wall-clock in time.Local; bare time.Parse
+	// would interpret the same digits as UTC and skew by the local offset).
+	parsed, err := time.ParseInLocation("2006-01-02 15:04:05.000", timestamp, time.Local)
 	if err != nil {
 		t.Errorf("Failed to parse timestamp %q: %v", timestamp, err)
 	}

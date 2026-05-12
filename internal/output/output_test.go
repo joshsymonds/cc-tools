@@ -3,10 +3,12 @@ package output
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestNewTerminal(t *testing.T) {
@@ -584,6 +586,13 @@ func TestWriteFailureHandling(t *testing.T) {
 }
 
 func TestColorRendering(t *testing.T) {
+	// Force a color profile; lipgloss's default renderer probes stdout for
+	// TTY support, and in `go test` stdout is a pipe, which downgrades to
+	// plain text and makes every level's "styled" output identical.
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
 	// Test that styles actually apply colors
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -715,8 +724,5 @@ func (f *failingWriter) Write(p []byte) (n int, err error) {
 }
 
 func formatMessage(format string, args ...any) string {
-	if len(args) == 0 {
-		return format
-	}
-	return strings.TrimSpace(strings.ReplaceAll(format, "%v", "%v"))[:len(format)]
+	return fmt.Sprintf(format, args...)
 }
