@@ -2,8 +2,10 @@ package statusline
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Veraticus/cc-tools/internal/aliases"
+	"github.com/mattn/go-runewidth"
 )
 
 // narrowWidthThreshold is the upper bound for narrow-mode activation.
@@ -164,4 +166,92 @@ func firstEnvChip(deps *Dependencies, data *CachedData) (narrowChip, bool) {
 		}, true
 	}
 	return narrowChip{}, false
+}
+
+// composeNarrowChain renders the chip slice as an ANSI string framed
+// by LeftCurve at the start and RightCurve at the end. Interior
+// chevrons mirror around the context chip: forward-pointing
+// (LeftChevron, U+E0B0) before the pivot, backward-pointing
+// (RightChevron, U+E0B2) at and after the pivot.
+//
+// The pivot is defined as "the chip immediately after the context
+// chip" — that's where direction reverses. If context is the last
+// chip (no chip after it), there's no pivot and all chevrons are
+// forward.
+//
+// Each chip body is wrapped as `<bg><baseFG> <body> <NC>`. Empty
+// input returns "". No width-budget logic here — that's the next
+// task's job.
+func (s *Statusline) composeNarrowChain(chips []narrowChip) string {
+	if len(chips) == 0 {
+		return ""
+	}
+	// Initialize colors if the caller didn't already (production
+	// path goes through Statusline.Render which sets s.colors; tests
+	// constructing chains directly need this guard).
+	emptyMocha := CatppuccinMocha{}
+	if s.colors == emptyMocha {
+		s.colors = CatppuccinMocha{}
+	}
+
+	// Pivot index: first chip whose Kind comes AFTER context in
+	// display order. We scan for context and take its successor.
+	// If context is absent (defensive) or is the last chip, pivot
+	// is len(chips) — all chevrons are forward.
+	pivot := len(chips)
+	for i, c := range chips {
+		if c.Kind == "context" && i+1 < len(chips) {
+			pivot = i + 1
+			break
+		}
+	}
+
+	var sb strings.Builder
+
+	// Leading LeftCurve in the first chip's FG, terminal-default bg.
+	// chips[0] is safe — guarded by `len(chips) == 0` early-return.
+	//nolint:gosec // G602 false positive: length-checked above
+	first := chips[0]
+	sb.WriteString(s.getColorFG(first.Color))
+	sb.WriteString(LeftCurve)
+	sb.WriteString(s.colors.NC())
+
+	for i, chip := range chips {
+		// Chip body: bg + base fg + padded body + reset.
+		sb.WriteString(s.getColorBG(chip.Color))
+		sb.WriteString(s.colors.BaseFG())
+		sb.WriteString(" ")
+		sb.WriteString(chip.Body)
+		sb.WriteString(" ")
+		sb.WriteString(s.colors.NC())
+
+		// Interior chevron between chip[i] and chip[i+1].
+		if i+1 < len(chips) {
+			next := chips[i+1]
+			sb.WriteString(s.getColorBG(next.Color))
+			sb.WriteString(s.getColorFG(chip.Color))
+			if i+1 < pivot {
+				sb.WriteString(LeftChevron)
+			} else {
+				sb.WriteString(RightChevron)
+			}
+			sb.WriteString(s.colors.NC())
+		}
+	}
+
+	// Trailing RightCurve in the last chip's FG, terminal-default bg.
+	last := chips[len(chips)-1]
+	sb.WriteString(s.getColorFG(last.Color))
+	sb.WriteString(RightCurve)
+	sb.WriteString(s.colors.NC())
+
+	return sb.String()
+}
+
+// narrowVisibleWidth returns the displayed cell count of s, ignoring
+// ANSI escape sequences. Uses the same primitive as the wide layout
+// (`runewidth.StringWidth(stripAnsi(s))`) so widths measured here are
+// directly comparable across renderers.
+func narrowVisibleWidth(s string) int {
+	return runewidth.StringWidth(stripAnsi(s))
 }
