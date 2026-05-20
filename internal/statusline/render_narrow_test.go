@@ -560,6 +560,71 @@ func TestRenderNarrow_Width15_DirOnly(t *testing.T) {
 	}
 }
 
+// --- dispatch tests ---
+
+func renderAt(t *testing.T, width int) string {
+	t.Helper()
+	deps := &Dependencies{
+		FileReader:    NewMockFileReader(),
+		CommandRunner: NewMockCommandRunner(),
+		EnvReader:     NewMockEnvReader(),
+		TerminalWidth: &MockTerminalWidth{width: width},
+		Resolver:      newTestResolver(t, ""),
+	}
+	s := CreateStatusline(deps)
+	data := &CachedData{
+		CurrentDir:     "/tmp/x",
+		ModelDisplay:   "Opus 4.7",
+		UsedPercentage: 25,
+		TermWidth:      width,
+	}
+	return s.Render(data)
+}
+
+// isNarrowOutput uses a structural signal to distinguish narrow from
+// wide rendering: narrow mode emits exactly ONE LeftCurve (the chain
+// start cap); wide mode emits multiple (one for the left section,
+// another wrapping the context bar in the middle).
+func isNarrowOutput(s string) bool {
+	stripped := stripAnsi(s)
+	return stringsCount(stripped, LeftCurve) == 1
+}
+
+func TestStatuslineRender_DispatchesToNarrowAtWidth50(t *testing.T) {
+	got := renderAt(t, 50)
+	if !isNarrowOutput(got) {
+		t.Errorf("Render at width=50 should use narrow mode (1 LeftCurve), got %d LeftCurves; stripped=%q",
+			stringsCount(stripAnsi(got), LeftCurve), stripAnsi(got))
+	}
+}
+
+func TestStatuslineRender_DispatchesAtExactlyThreshold80(t *testing.T) {
+	got := renderAt(t, 80)
+	if !isNarrowOutput(got) {
+		t.Errorf("Render at width=80 (≤threshold) should use narrow mode; got %d LeftCurves",
+			stringsCount(stripAnsi(got), LeftCurve))
+	}
+}
+
+func TestStatuslineRender_DispatchesToWideAt81(t *testing.T) {
+	got := renderAt(t, 81)
+	if isNarrowOutput(got) {
+		t.Errorf("Render at width=81 (>threshold) should use wide mode; got narrow-style 1-LeftCurve output: %q",
+			stripAnsi(got))
+	}
+}
+
+func TestStatuslineRender_DispatchesToWideAt200(t *testing.T) {
+	got := renderAt(t, 200)
+	if isNarrowOutput(got) {
+		t.Errorf("Render at width=200 should use wide mode; got narrow-style output: %q",
+			stripAnsi(got))
+	}
+	if stripAnsi(got) == "" {
+		t.Errorf("wide-mode render at 200 should not be empty")
+	}
+}
+
 // --- helpers ---
 
 func contains(haystack, needle string) bool {

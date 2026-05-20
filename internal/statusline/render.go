@@ -14,12 +14,23 @@ import (
 func (s *Statusline) Render(data *CachedData) string {
 	termWidth := s.getTermWidth(data)
 	s.colors = CatppuccinMocha{}
-	modelIcon := s.selectModelIcon()
-	dirPath := formatPath(data.CurrentDir)
 
-	// Calculate widths
+	// Calculate widths up-front. Both narrow and wide rendering use
+	// effectiveWidth (termWidth − spacers) as their actual budget;
+	// the spacer convention is honored by both paths.
 	leftSpacerWidth, rightSpacerWidth, contentWidth := s.calculateWidths(termWidth)
 	effectiveWidth := termWidth - leftSpacerWidth - rightSpacerWidth
+
+	// Narrow-mode dispatch: when the detected terminal width is
+	// ≤ narrowWidthThreshold, render the phone-friendly edge-to-edge
+	// chip chain instead of the wide chevron-chain layout. Activation
+	// is automatic from the width detection; no setting required.
+	if termWidth <= narrowWidthThreshold {
+		return s.renderNarrow(data, effectiveWidth)
+	}
+
+	modelIcon := s.selectModelIcon()
+	dirPath := formatPath(data.CurrentDir)
 
 	// Debug terminal width
 	if os.Getenv("DEBUG_WIDTH") == "1" {
