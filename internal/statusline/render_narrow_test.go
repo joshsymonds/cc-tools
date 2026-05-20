@@ -351,6 +351,215 @@ func TestNarrowVisibleWidth_MatchesWideConvention(t *testing.T) {
 	}
 }
 
+// --- width fitting + render tests ---
+
+func TestFitNarrowChain_AllFitWithSlack(t *testing.T) {
+	chips := []narrowChip{
+		{Color: "lavender", Body: "~/x", Kind: "dir"},
+		{Color: "green", Body: "0%", Kind: "context"},
+		{Color: "pink", Body: " main", Kind: "branch"},
+	}
+	got := fitNarrowChain(chips, 50)
+	if len(got) != 3 {
+		t.Fatalf("want 3 chips kept, got %d", len(got))
+	}
+	// Context chip should have expanded — its body wider than "0%".
+	ctxIdx := -1
+	for i, c := range got {
+		if c.Kind == "context" {
+			ctxIdx = i
+		}
+	}
+	if ctxIdx == -1 {
+		t.Fatal("context chip missing")
+	}
+	if !contains(got[ctxIdx].Body, "0%") {
+		t.Errorf("context body should still contain '0%%', got %q", got[ctxIdx].Body)
+	}
+	if got[ctxIdx].Body == "0%" {
+		t.Errorf("context body did NOT expand for slack absorption; still %q", got[ctxIdx].Body)
+	}
+}
+
+func TestFitNarrowChain_DropEnvFirst(t *testing.T) {
+	// Very long env chip — should drop first under pressure.
+	chips := []narrowChip{
+		{Color: "lavender", Body: "~/proj", Kind: "dir"},
+		{Color: "green", Body: "0%", Kind: "context"},
+		{Color: "pink", Body: " main", Kind: "branch"},
+		{Color: "peach", Body: " a-really-long-aws-profile-name", Kind: "env"},
+	}
+	got := fitNarrowChain(chips, 30)
+	hasEnv := false
+	hasBranch := false
+	for _, c := range got {
+		if c.Kind == "env" {
+			hasEnv = true
+		}
+		if c.Kind == "branch" {
+			hasBranch = true
+		}
+	}
+	if hasEnv {
+		t.Errorf("env should be dropped first at budget=30, got chips: %+v", got)
+	}
+	if !hasBranch {
+		t.Errorf("branch should survive (env drops first); got: %+v", got)
+	}
+}
+
+func TestFitNarrowChain_DropBranchSecond(t *testing.T) {
+	chips := []narrowChip{
+		{Color: "lavender", Body: "~/proj", Kind: "dir"},
+		{Color: "green", Body: "0%", Kind: "context"},
+		{Color: "pink", Body: " feature/very-long-branch-name", Kind: "branch"},
+		{Color: "peach", Body: " prod", Kind: "env"},
+	}
+	got := fitNarrowChain(chips, 25)
+	hasBranch := false
+	hasEnv := false
+	for _, c := range got {
+		if c.Kind == "branch" {
+			hasBranch = true
+		}
+		if c.Kind == "env" {
+			hasEnv = true
+		}
+	}
+	if hasEnv {
+		t.Errorf("env should drop before branch at budget=25, got chips: %+v", got)
+	}
+	if hasBranch {
+		t.Errorf("branch should ALSO drop at budget=25; got: %+v", got)
+	}
+}
+
+func TestFitNarrowChain_TruncateDirToLeaf(t *testing.T) {
+	// Dir is long; only dir+context with both env+branch dropped
+	// still doesn't fit until dir is truncated to its leaf.
+	chips := []narrowChip{
+		{Color: "lavender", Body: "~/Personal/cc-tools/long/path/segment", Kind: "dir"},
+		{Color: "green", Body: "0%", Kind: "context"},
+	}
+	got := fitNarrowChain(chips, 18)
+	if len(got) < 1 {
+		t.Fatalf("want at least dir chip, got nothing")
+	}
+	// Dir body should be just the leaf "segment".
+	if got[0].Kind != "dir" {
+		t.Fatalf("chips[0] should be dir, got %+v", got[0])
+	}
+	if contains(got[0].Body, "/") {
+		t.Errorf("dir body should be leaf-only (no slash), got %q", got[0].Body)
+	}
+	if !contains(got[0].Body, "segment") {
+		t.Errorf("dir body should contain leaf 'segment', got %q", got[0].Body)
+	}
+}
+
+func TestFitNarrowChain_DirAlwaysSurvives(t *testing.T) {
+	chips := []narrowChip{
+		{Color: "lavender", Body: "~/proj", Kind: "dir"},
+		{Color: "green", Body: "0%", Kind: "context"},
+		{Color: "pink", Body: " main", Kind: "branch"},
+		{Color: "peach", Body: " prod", Kind: "env"},
+	}
+	got := fitNarrowChain(chips, 10) // extreme tight
+	if len(got) == 0 {
+		t.Fatalf("dir must always survive; got empty slice")
+	}
+	if got[0].Kind != "dir" {
+		t.Errorf("first surviving chip must be dir; got %+v", got[0])
+	}
+}
+
+func TestPadContextBody_EvenSlack(t *testing.T) {
+	got := padContextBody("42%", 11)
+	// width("42%") = 3, slack = 8, left = 4, right = 4.
+	want := "    42%    "
+	if got != want {
+		t.Errorf("padContextBody(42%%, 11) = %q, want %q", got, want)
+	}
+}
+
+func TestPadContextBody_OddSlack(t *testing.T) {
+	got := padContextBody("42%", 10)
+	// width = 3, slack = 7, left = 3, right = 4 (extra goes right).
+	want := "   42%    "
+	if got != want {
+		t.Errorf("padContextBody(42%%, 10) = %q, want %q", got, want)
+	}
+}
+
+func TestPadContextBody_BodyTooBig(t *testing.T) {
+	got := padContextBody("42%", 2)
+	if got != "42%" {
+		t.Errorf("targetWidth < body width should return unchanged, got %q", got)
+	}
+}
+
+func TestRenderNarrow_Width50_AllChips(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	data := &CachedData{
+		CurrentDir:     "/tmp/x",
+		UsedPercentage: 25,
+		GitBranch:      "main",
+	}
+	// AWS env via the mock env reader.
+	if er, ok := s.deps.EnvReader.(*MockEnvReader); ok {
+		er.vars["AWS_PROFILE"] = "staging"
+	}
+	got := s.renderNarrow(data, 50)
+	w := narrowVisibleWidth(got)
+	if w != 50 {
+		t.Errorf("renderNarrow(50) visible width = %d, want 50; output=%q", w, stripAnsi(got))
+	}
+	if !contains(stripAnsi(got), LeftCurve) {
+		t.Errorf("output missing LeftCurve")
+	}
+	if !contains(stripAnsi(got), RightCurve) {
+		t.Errorf("output missing RightCurve")
+	}
+}
+
+func TestRenderNarrow_Width80_AllChips(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	data := &CachedData{
+		CurrentDir:     "/tmp/x",
+		UsedPercentage: 50,
+		GitBranch:      "main",
+	}
+	got := s.renderNarrow(data, 80)
+	if w := narrowVisibleWidth(got); w != 80 {
+		t.Errorf("renderNarrow(80) visible width = %d, want 80", w)
+	}
+}
+
+func TestRenderNarrow_Width30_DirAndContextOnly(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	data := &CachedData{
+		CurrentDir:     "/tmp/x",
+		UsedPercentage: 50,
+		GitBranch:      "feature/very-long-branch-name",
+	}
+	got := s.renderNarrow(data, 30)
+	if w := narrowVisibleWidth(got); w != 30 {
+		t.Errorf("renderNarrow(30) visible width = %d, want 30; output=%q", w, stripAnsi(got))
+	}
+}
+
+func TestRenderNarrow_Width15_DirOnly(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	data := &CachedData{
+		CurrentDir:     "/home/user/projects/very-long-name",
+		UsedPercentage: 50,
+	}
+	got := s.renderNarrow(data, 15)
+	if w := narrowVisibleWidth(got); w != 15 {
+		t.Errorf("renderNarrow(15) visible width = %d, want 15; output=%q", w, stripAnsi(got))
+	}
+}
+
 // --- helpers ---
 
 func contains(haystack, needle string) bool {
