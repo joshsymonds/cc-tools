@@ -4,10 +4,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 )
 
 const (
@@ -15,12 +17,16 @@ const (
 	parentWidthFile  = "parent-width"
 	widthsJSONFile   = "widths.json"
 
-	// Cache files are world-readable: dispatched agent processes may
-	// run under the same user but the daemon is the only writer, and
-	// keeping it 0644 mirrors how /var/run state files are typically
-	// shared on a single-user box.
+	// Cache files are world-readable so other processes running as the
+	// same user (the statusline binary in a dispatched-subagent
+	// context) can consume them. The daemon is the only writer.
 	cacheFileMode = 0o644
-	cacheDirMode  = 0o755
+
+	// 0o700 (not 0o755) because no other UID has business reading
+	// these files: dispatched subagents always run as the same user.
+	// Tighter mode also serves as a sanity flag if a foreign UID
+	// pre-created the dir on world-writable /dev/shm.
+	cacheDirMode = 0o700
 
 	// 4 bytes of randomness -> 8 hex chars; collisions across
 	// concurrent writers in the same dir are astronomically unlikely
@@ -28,6 +34,13 @@ const (
 	// project's lint config forbids "Temp" in production code.
 	scratchRandBytes = 4
 )
+
+// errForeignCacheDir surfaces when the cache directory exists but is
+// owned by a different UID. /dev/shm is world-writable (mode 1777),
+// so a malicious local user could pre-create the dir and seed it with
+// attacker-supplied widths. We refuse to write into a directory we
+// don't own.
+var errForeignCacheDir = errors.New("cache directory owned by another user")
 
 // Writer persists the daemon's current width observation to disk in a
 // way that readers (the statusline running in a headless dispatched
@@ -44,13 +57,16 @@ type Writer struct {
 // If width <= 0 the call is a no-op: the epic forbids writing 0 or
 // negative widths because the statusline's read path would parse them
 // as valid sources.
+//
+// Refuses to write into a foreign-owned cache directory — a defense
+// against squatting on world-writable /dev/shm.
 func (w *Writer) Write(width int, sources []Source) error {
 	if width <= 0 {
 		return nil
 	}
 	dir := w.resolveDir()
-	if mkErr := os.MkdirAll(dir, cacheDirMode); mkErr != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, mkErr)
+	if mkErr := ensureOwnedDir(dir); mkErr != nil {
+		return fmt.Errorf("prepare %s: %w", dir, mkErr)
 	}
 
 	widthBytes := []byte(strconv.Itoa(width) + "\n")
@@ -75,18 +91,63 @@ func (w *Writer) resolveDir() string {
 	return w.Dir
 }
 
-// writeFileAtomic writes data to dir/name via a scratch file + rename.
-// On any error before the rename, the scratch file is removed so the
-// directory never accumulates orphans.
+// ensureOwnedDir creates dir if missing, then verifies the resulting
+// directory is owned by the current UID. Refuses with
+// errForeignCacheDir if a different user pre-created it (defending
+// against /dev/shm squatting).
+func ensureOwnedDir(dir string) error {
+	if err := os.MkdirAll(dir, cacheDirMode); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	// Lstat (not Stat): if dir is itself a symlink to a foreign
+	// location, that's also disqualifying.
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("lstat: %w", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		// Non-unix platform (or future Go change) — best-effort skip
+		// the ownership check rather than fail closed.
+		return nil
+	}
+	if int(stat.Uid) != os.Getuid() {
+		return fmt.Errorf("%w: dir=%s owner_uid=%d our_uid=%d",
+			errForeignCacheDir, dir, stat.Uid, os.Getuid())
+	}
+	return nil
+}
+
+// writeFileAtomic writes data to dir/name via a scratch file + rename
+// in a single open+write+close. On any error before the rename, the
+// scratch file is removed so the directory never accumulates orphans.
+//
+// Single-open (no separate openScratchFile + os.WriteFile pair):
+// O_EXCL on the scratch path guarantees nobody else owns that name
+// for the duration of our write, and the 4-byte random suffix makes
+// concurrent same-process collisions astronomically unlikely.
 func writeFileAtomic(dir, name string, data []byte) error {
-	scratchPath, openErr := openScratchFile(dir, name)
+	scratchPath, scratchErr := scratchPathFor(dir, name)
+	if scratchErr != nil {
+		return fmt.Errorf("scratch path: %w", scratchErr)
+	}
+
+	//nolint:gosec // scratch path is built from a randomized suffix
+	// inside the daemon-owned cache dir; not user-controlled.
+	f, openErr := os.OpenFile(scratchPath,
+		os.O_WRONLY|os.O_CREATE|os.O_EXCL,
+		cacheFileMode)
 	if openErr != nil {
 		return fmt.Errorf("open scratch: %w", openErr)
 	}
-
-	if writeErr := os.WriteFile(scratchPath, data, cacheFileMode); writeErr != nil {
+	if _, writeErr := f.Write(data); writeErr != nil {
+		_ = f.Close()
 		_ = os.Remove(scratchPath)
 		return fmt.Errorf("write scratch: %w", writeErr)
+	}
+	if closeErr := f.Close(); closeErr != nil {
+		_ = os.Remove(scratchPath)
+		return fmt.Errorf("close scratch: %w", closeErr)
 	}
 
 	finalPath := filepath.Join(dir, name)
@@ -97,26 +158,10 @@ func writeFileAtomic(dir, name string, data []byte) error {
 	return nil
 }
 
-// openScratchFile picks a unique scratch path in dir, creates it with
-// O_EXCL to avoid collisions, and returns the path. The file is left
-// open-and-closed (writeFile will rewrite it) — we just needed the
-// O_EXCL guarantee that we own this name.
-func openScratchFile(dir, base string) (string, error) {
+func scratchPathFor(dir, base string) (string, error) {
 	suffix := make([]byte, scratchRandBytes)
 	if _, randErr := rand.Read(suffix); randErr != nil {
 		return "", fmt.Errorf("entropy: %w", randErr)
 	}
-	scratch := filepath.Join(dir, fmt.Sprintf("%s-%s.scratch", base, hex.EncodeToString(suffix)))
-	// gosec G304: scratch path is built from a randomized suffix inside
-	// the daemon-owned cache dir; not user-controlled.
-	//nolint:gosec // see comment above
-	f, openErr := os.OpenFile(scratch, os.O_RDWR|os.O_CREATE|os.O_EXCL, cacheFileMode)
-	if openErr != nil {
-		return "", fmt.Errorf("open %s: %w", scratch, openErr)
-	}
-	if closeErr := f.Close(); closeErr != nil {
-		_ = os.Remove(scratch)
-		return "", fmt.Errorf("close %s: %w", scratch, closeErr)
-	}
-	return scratch, nil
+	return filepath.Join(dir, fmt.Sprintf("%s-%s.scratch", base, hex.EncodeToString(suffix))), nil
 }

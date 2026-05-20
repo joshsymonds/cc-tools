@@ -137,3 +137,25 @@ func TestGetWidthCache_Zero(t *testing.T) {
 		t.Errorf("getWidthCache(0) = %d, want 0", got)
 	}
 }
+
+func TestGetWidthCache_RejectsSymlink(t *testing.T) {
+	// Defense against /dev/shm squatting: if the cache path is a
+	// symlink, refuse to follow it. An attacker who can write into
+	// the cache dir could otherwise plant a symlink at the canonical
+	// path and redirect statusline reads to arbitrary readable files.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real-width")
+	if err := os.WriteFile(target, []byte("80\n"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(dir, "parent-width")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	pointWidthCacheAt(t, link)
+
+	tw := &DefaultTerminalWidth{}
+	if got := tw.getWidthCache(); got != 0 {
+		t.Errorf("getWidthCache(symlink) = %d, want 0 — O_NOFOLLOW should reject", got)
+	}
+}

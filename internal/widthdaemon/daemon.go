@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -147,12 +148,31 @@ func (d *Daemon) Run(ctx context.Context) error {
 // tick runs one detection cycle. Returns the aggregated sources, the
 // min width, and whether a real width was detected (false means leave
 // the cache alone — epic anti-pattern: never write 0).
+//
+// Detectors run concurrently: tmux forks a subprocess (5-20ms) and
+// utmp does file I/O + ioctls — there's no reason to serialize them
+// when both honor the same ctx and write to their own result vars.
 func (d *Daemon) tick(ctx context.Context) ([]Source, int, bool) {
-	tmuxSources, tmuxErr := d.cfg.Tmux.Detect(ctx)
+	const concurrentDetectors = 2
+	var (
+		wg                       sync.WaitGroup
+		tmuxSources, utmpSources []Source
+		tmuxErr, utmpErr         error
+	)
+	wg.Add(concurrentDetectors)
+	go func() {
+		defer wg.Done()
+		tmuxSources, tmuxErr = d.cfg.Tmux.Detect(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		utmpSources, utmpErr = d.cfg.Utmp.Detect(ctx)
+	}()
+	wg.Wait()
+
 	if tmuxErr != nil && !errors.Is(tmuxErr, context.Canceled) {
 		_, _ = fmt.Fprintf(d.logger, "widthdaemon: tmux detect: %v\n", tmuxErr)
 	}
-	utmpSources, utmpErr := d.cfg.Utmp.Detect(ctx)
 	if utmpErr != nil && !errors.Is(utmpErr, context.Canceled) {
 		_, _ = fmt.Fprintf(d.logger, "widthdaemon: utmp detect: %v\n", utmpErr)
 	}

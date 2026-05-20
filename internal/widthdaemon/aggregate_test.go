@@ -14,14 +14,14 @@ func TestAggregate_Empty(t *testing.T) {
 
 func TestAggregate_TmuxAndUtmpSameTTYDeduped(t *testing.T) {
 	in := []Source{
-		{Kind: "tmux", TTY: "/dev/pts/3", Width: 200, Session: "main"},
-		{Kind: "tty", TTY: "/dev/pts/3", Width: 200}, // duplicate of tmux
-		{Kind: "tty", TTY: "/dev/pts/5", Width: 80},  // distinct
+		{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 200, Session: "main"},
+		{Kind: SourceKindTTY, TTY: "/dev/pts/3", Width: 200}, // duplicate of tmux
+		{Kind: SourceKindTTY, TTY: "/dev/pts/5", Width: 80},  // distinct
 	}
 	got := Aggregate(in)
 	want := []Source{
-		{Kind: "tmux", TTY: "/dev/pts/3", Width: 200, Session: "main"},
-		{Kind: "tty", TTY: "/dev/pts/5", Width: 80},
+		{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 200, Session: "main"},
+		{Kind: SourceKindTTY, TTY: "/dev/pts/5", Width: 80},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Aggregate dedup mismatch:\n got %+v\nwant %+v", got, want)
@@ -30,8 +30,8 @@ func TestAggregate_TmuxAndUtmpSameTTYDeduped(t *testing.T) {
 
 func TestAggregate_TwoTmuxKept(t *testing.T) {
 	in := []Source{
-		{Kind: "tmux", TTY: "/dev/pts/3", Width: 200, Session: "main"},
-		{Kind: "tmux", TTY: "/dev/pts/5", Width: 80, Session: "mobile"},
+		{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 200, Session: "main"},
+		{Kind: SourceKindTmux, TTY: "/dev/pts/5", Width: 80, Session: "mobile"},
 	}
 	got := Aggregate(in)
 	if len(got) != 2 {
@@ -42,11 +42,11 @@ func TestAggregate_TwoTmuxKept(t *testing.T) {
 func TestAggregate_StableOrderTmuxFirst(t *testing.T) {
 	// utmp entries come first in input — Aggregate must reorder to tmux-then-utmp.
 	in := []Source{
-		{Kind: "tty", TTY: "/dev/pts/5", Width: 80},
-		{Kind: "tmux", TTY: "/dev/pts/3", Width: 200, Session: "main"},
+		{Kind: SourceKindTTY, TTY: "/dev/pts/5", Width: 80},
+		{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 200, Session: "main"},
 	}
 	got := Aggregate(in)
-	if len(got) != 2 || got[0].Kind != "tmux" || got[1].Kind != "tty" {
+	if len(got) != 2 || got[0].Kind != SourceKindTmux || got[1].Kind != SourceKindTTY {
 		t.Errorf("Aggregate: want tmux-then-utmp order, got %+v", got)
 	}
 }
@@ -60,9 +60,9 @@ func TestMinWidth_Empty(t *testing.T) {
 
 func TestMinWidth_PicksSmallest(t *testing.T) {
 	in := []Source{
-		{Kind: "tmux", TTY: "/dev/pts/3", Width: 200, Session: "main"},
-		{Kind: "tty", TTY: "/dev/pts/5", Width: 80},
-		{Kind: "tmux", TTY: "/dev/pts/7", Width: 120, Session: "other"},
+		{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 200, Session: "main"},
+		{Kind: SourceKindTTY, TTY: "/dev/pts/5", Width: 80},
+		{Kind: SourceKindTmux, TTY: "/dev/pts/7", Width: 120, Session: "other"},
 	}
 	w, ok := MinWidth(in)
 	if !ok || w != 80 {
@@ -74,9 +74,9 @@ func TestMinWidth_IgnoresNonPositive(t *testing.T) {
 	// Defensive: even if a 0 or negative slips through upstream filters,
 	// MinWidth must not return it.
 	in := []Source{
-		{Kind: "tmux", TTY: "/dev/pts/3", Width: 0, Session: "main"},
-		{Kind: "tty", TTY: "/dev/pts/5", Width: -5},
-		{Kind: "tmux", TTY: "/dev/pts/7", Width: 200, Session: "other"},
+		{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 0, Session: "main"},
+		{Kind: SourceKindTTY, TTY: "/dev/pts/5", Width: -5},
+		{Kind: SourceKindTmux, TTY: "/dev/pts/7", Width: 200, Session: "other"},
 	}
 	w, ok := MinWidth(in)
 	if !ok || w != 200 {
@@ -86,11 +86,26 @@ func TestMinWidth_IgnoresNonPositive(t *testing.T) {
 
 func TestMinWidth_AllNonPositive(t *testing.T) {
 	in := []Source{
-		{Kind: "tmux", TTY: "/dev/pts/3", Width: 0, Session: "main"},
-		{Kind: "tty", TTY: "/dev/pts/5", Width: -1},
+		{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 0, Session: "main"},
+		{Kind: SourceKindTTY, TTY: "/dev/pts/5", Width: -1},
 	}
 	w, ok := MinWidth(in)
 	if ok || w != 0 {
 		t.Errorf("MinWidth: want (0, false) for all non-positive, got (%d, %v)", w, ok)
+	}
+}
+
+func TestAggregate_DoesNotMutateInput(t *testing.T) {
+	in := []Source{
+		{Kind: SourceKindTTY, TTY: "/dev/pts/5", Width: 80},
+		{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 200, Session: "main"},
+		{Kind: SourceKindTTY, TTY: "/dev/pts/3", Width: 200}, // would be deduped
+	}
+	snapshot := append([]Source(nil), in...)
+
+	_ = Aggregate(in)
+
+	if !reflect.DeepEqual(in, snapshot) {
+		t.Errorf("Aggregate mutated input:\n got %+v\nwant %+v", in, snapshot)
 	}
 }

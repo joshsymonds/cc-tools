@@ -73,14 +73,30 @@ func (f *fakeSink) lastWidth() int {
 	return f.writes[len(f.writes)-1].width
 }
 
-// runDaemon spins the loop in a goroutine and stops it after wait.
-func runDaemon(t *testing.T, d *Daemon, wait time.Duration) {
+// runDaemon spins the loop in a goroutine, waits until both detectors
+// have been polled minTicks times each (deterministic — driven by the
+// detectors' call counters, not wall-clock sleep), then cancels and
+// asserts a clean shutdown within 1s.
+func runDaemon(t *testing.T, d *Daemon, tmux, utmp *fakeDetector, minTicks int32) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- d.Run(ctx) }()
-	time.Sleep(wait)
+
+	// Spin until both detectors have observed at least minTicks calls.
+	// 2s hard cap protects against a hung daemon.
+	deadline := time.Now().Add(2 * time.Second)
+	for tmux.calls.Load() < minTicks || utmp.calls.Load() < minTicks {
+		if time.Now().After(deadline) {
+			t.Fatalf("detectors did not reach %d ticks within 2s (tmux=%d utmp=%d)",
+				minTicks, tmux.calls.Load(), utmp.calls.Load())
+		}
+		// 1ms is below the detectors' active interval in tests (5ms),
+		// so we sample frequently without busy-spinning.
+		time.Sleep(time.Millisecond)
+	}
+
 	cancel()
 	select {
 	case err := <-done:
@@ -107,7 +123,7 @@ func TestDaemon_Run_SingleTickWrites(t *testing.T) {
 		Utmp:           utmp,
 		Sink:           sink,
 	})
-	runDaemon(t, d, 30*time.Millisecond)
+	runDaemon(t, d, tmux, utmp, 3)
 
 	if sink.callCount() == 0 {
 		t.Fatalf("expected at least one write, got none")
@@ -132,7 +148,7 @@ func TestDaemon_Run_StableWidthWritesOnce(t *testing.T) {
 		Utmp:           utmp,
 		Sink:           sink,
 	})
-	runDaemon(t, d, 50*time.Millisecond)
+	runDaemon(t, d, tmux, utmp, 8)
 
 	// Many ticks fired but only the first should have written, since
 	// the width never changed.
@@ -157,7 +173,7 @@ func TestDaemon_Run_WidthChangeTriggersWrite(t *testing.T) {
 		Utmp:           utmp,
 		Sink:           sink,
 	})
-	runDaemon(t, d, 50*time.Millisecond)
+	runDaemon(t, d, tmux, utmp, 8)
 
 	if got := sink.callCount(); got != 2 {
 		t.Errorf("width change should produce 2 writes, got %d", got)
@@ -180,7 +196,7 @@ func TestDaemon_Run_AllSourcesEmptyNoWrite(t *testing.T) {
 		Utmp:           utmp,
 		Sink:           sink,
 	})
-	runDaemon(t, d, 30*time.Millisecond)
+	runDaemon(t, d, tmux, utmp, 3)
 
 	if got := sink.callCount(); got != 0 {
 		t.Errorf("empty sources should produce 0 writes, got %d", got)
@@ -202,7 +218,7 @@ func TestDaemon_Run_DetectorErrorContinues(t *testing.T) {
 		Utmp:           utmp,
 		Sink:           sink,
 	})
-	runDaemon(t, d, 30*time.Millisecond)
+	runDaemon(t, d, tmux, utmp, 3)
 
 	// One source erroring shouldn't kill the daemon; the other source
 	// should still produce a write.
@@ -241,15 +257,66 @@ func TestDaemon_Run_ContextCancelReturnsPromptly(t *testing.T) {
 	}
 }
 
-func TestDaemon_Run_DefaultsApplied(t *testing.T) {
-	d := Build(Config{Sink: &fakeSink{}, Tmux: &fakeDetector{}, Utmp: &fakeDetector{}})
-	if d.cfg.ActiveInterval != defaultActiveInterval {
-		t.Errorf("default ActiveInterval = %v, want %v", d.cfg.ActiveInterval, defaultActiveInterval)
+// TestDaemon_Run_IdleIntervalEngagesAfterStability observes the
+// behavior of the idle-interval transition. With an Active cadence
+// much faster than Idle and IdleAfter elapsing during the run window,
+// the *observed* tick rate must slow once IdleAfter has elapsed —
+// otherwise the idle-branch in Run() is broken.
+//
+// This replaces a previous tautological default-mirror test (which
+// only asserted that `Build` copied the constants onto the cfg
+// struct) with a behavioral check.
+func TestDaemon_Run_IdleIntervalEngagesAfterStability(t *testing.T) {
+	tmux := &fakeDetector{results: [][]Source{
+		{{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 80, Session: "main"}},
+	}}
+	utmp := &fakeDetector{results: [][]Source{nil}}
+	sink := &fakeSink{}
+
+	d := Build(Config{
+		ActiveInterval: 2 * time.Millisecond,
+		IdleInterval:   40 * time.Millisecond, // 20x slower
+		IdleAfter:      20 * time.Millisecond,
+		Tmux:           tmux,
+		Utmp:           utmp,
+		Sink:           sink,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx) }()
+
+	// Phase 1: wait until IdleAfter has demonstrably elapsed since
+	// the first (and only) width change. At 2ms cadence with
+	// IdleAfter=20ms, ~10 active ticks will pass before the idle
+	// branch starts setting the timer to IdleInterval. We wait for
+	// ~30ms to ensure we're past the transition and the *next* timer
+	// reset will use IdleInterval.
+	time.Sleep(35 * time.Millisecond)
+
+	// Phase 2: now measure tick rate. Over a 120ms window at
+	// IdleInterval=40ms we expect ~3 ticks. At ActiveInterval=2ms
+	// we'd see ~60. The gap is wide enough that the test is robust
+	// to scheduler jitter.
+	ticksAtIdleStart := tmux.calls.Load()
+	time.Sleep(120 * time.Millisecond)
+	idleDelta := tmux.calls.Load() - ticksAtIdleStart
+
+	cancel()
+	<-done
+
+	// 120ms / 40ms idle ≈ 3 idle ticks. If still in active mode
+	// at 2ms cadence we'd see ~60. Pick an upper bound that catches
+	// "idle never engages" but tolerates scheduler delay.
+	const maxIdleTicks int32 = 10
+	if idleDelta > maxIdleTicks {
+		t.Errorf("expected idle backoff to slow ticks; saw %d ticks in 120ms after stability "+
+			"(at IdleInterval=40ms this should be ~3, at ActiveInterval=2ms it would be ~60). "+
+			"Idle branch likely not engaging.",
+			idleDelta)
 	}
-	if d.cfg.IdleInterval != defaultIdleInterval {
-		t.Errorf("default IdleInterval = %v, want %v", d.cfg.IdleInterval, defaultIdleInterval)
-	}
-	if d.cfg.IdleAfter != defaultIdleAfter {
-		t.Errorf("default IdleAfter = %v, want %v", d.cfg.IdleAfter, defaultIdleAfter)
+	if idleDelta == 0 {
+		t.Errorf("expected at least one idle tick in 120ms, got 0 — daemon may be stuck")
 	}
 }

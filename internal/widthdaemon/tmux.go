@@ -48,6 +48,12 @@ func (DefaultCommandRunner) Run(ctx context.Context, name string, args ...string
 	return out, nil
 }
 
+// tmuxNotRunningCacheTTL is how long we trust a prior "tmux not
+// running" result before re-probing. At the default daemon idle
+// cadence of 5s that's a 6x reduction in subprocess forks for hosts
+// where tmux is never used.
+const tmuxNotRunningCacheTTL = 30 * time.Second
+
 // TmuxSource detects terminal widths from attached tmux clients.
 //
 // Runner is injected so tests can supply fake subprocess output.
@@ -55,9 +61,15 @@ func (DefaultCommandRunner) Run(ctx context.Context, name string, args ...string
 // LogWriter receives one-line warnings about malformed tmux output. It
 // defaults to os.Stderr when nil, which means journalctl picks them up
 // in the deployed daemon.
+//
+// notRunningUntil records when we may next try tmux after observing
+// exit code 1 ("no server running"). Single-goroutine access from
+// Daemon.Run; if multi-goroutine callers ever appear, this field
+// needs a sync.Mutex.
 type TmuxSource struct {
-	Runner    CommandRunner
-	LogWriter io.Writer
+	Runner          CommandRunner
+	LogWriter       io.Writer
+	notRunningUntil time.Time
 }
 
 // Detect runs `tmux list-clients -F '#{client_tty} #{client_width}
@@ -73,14 +85,21 @@ func (t *TmuxSource) Detect(ctx context.Context) ([]Source, error) {
 		return nil, fmt.Errorf("tmux detect: %w", err)
 	}
 
+	if !t.notRunningUntil.IsZero() && time.Now().Before(t.notRunningUntil) {
+		return nil, nil
+	}
+
 	out, err := t.Runner.Run(ctx, "tmux", "list-clients", "-F", "#{client_tty} #{client_width} #{client_session}")
 	if err != nil {
 		var exitCoder interface{ ExitCode() int }
 		if errors.As(err, &exitCoder) && exitCoder.ExitCode() == tmuxNotRunningExitCode {
+			t.notRunningUntil = time.Now().Add(tmuxNotRunningCacheTTL)
 			return nil, nil
 		}
 		return nil, fmt.Errorf("tmux list-clients: %w", err)
 	}
+	// Successful probe — clear any stale negative cache.
+	t.notRunningUntil = time.Time{}
 
 	logTo := t.logWriter()
 

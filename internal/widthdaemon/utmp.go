@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -24,6 +25,16 @@ const (
 	defaultUtmpPath      = "/var/run/utmp"
 )
 
+// validUtmpLine accepts only the canonical TTY name patterns that
+// appear in utmp on Linux/macOS: `pts/N` (pseudo-terminals), `ttyN`
+// (virtual consoles), or `tty` (the controlling terminal). Anything
+// containing `..`, additional slashes, or symlink characters is
+// rejected before being concatenated into a device path — this
+// prevents a hostile utmp writer (root, or members of the utmp
+// group on some distros) from steering the daemon's open() at a
+// FIFO or a serial device whose open would block indefinitely.
+var validUtmpLine = regexp.MustCompile(`^(pts/[0-9]+|tty[0-9]*)$`)
+
 // WinsizeReader queries the window size of a TTY device. It is the
 // boundary that lets tests substitute canned widths for real ioctls.
 //
@@ -37,16 +48,25 @@ type WinsizeReader interface {
 // DefaultWinsizeReader queries TIOCGWINSZ on the live TTY device.
 type DefaultWinsizeReader struct{}
 
-// Read opens ttyPath with O_RDONLY|O_NOCTTY, queries TIOCGWINSZ, and
-// returns the column count. O_NOCTTY is non-negotiable: without it,
-// opening a TTY can promote it to the daemon's controlling terminal,
-// which would let SIGHUP/SIGWINCH propagate to a process that has no
-// business receiving them.
+// Read opens ttyPath with O_RDONLY|O_NOCTTY|O_NONBLOCK, queries
+// TIOCGWINSZ, and returns the column count.
+//
+//   - O_NOCTTY is non-negotiable: without it, opening a TTY can
+//     promote it to the daemon's controlling terminal, which would
+//     let SIGHUP/SIGWINCH propagate to a process that has no business
+//     receiving them.
+//   - O_NONBLOCK prevents indefinite blocking if ttyPath turns out to
+//     be a FIFO without a writer or a serial device awaiting carrier
+//     detect. The Linux open(2) man page is explicit: read-opening a
+//     FIFO blocks until a writer arrives. TIOCGWINSZ itself doesn't
+//     care whether the FD is non-blocking, so this is a zero-cost
+//     mitigation against a utmp poisoning attack.
 func (DefaultWinsizeReader) Read(ttyPath string) (uint16, error) {
 	// gosec G304: ttyPath originates from /var/run/utmp (root-owned)
-	// and is bounded to /dev/<ut_line> by the caller. Reading
-	// arbitrary paths is the daemon's whole purpose.
-	f, err := os.OpenFile(ttyPath, os.O_RDONLY|syscall.O_NOCTTY, 0) //nolint:gosec // see comment above
+	// and is bounded to /dev/<validated-ut_line> by the caller.
+	// Reading arbitrary paths is the daemon's whole purpose.
+	//nolint:gosec // see comment above
+	f, err := os.OpenFile(ttyPath, os.O_RDONLY|syscall.O_NOCTTY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", ttyPath, err)
 	}
@@ -117,6 +137,13 @@ func (u *UtmpSource) Detect(ctx context.Context) ([]Source, error) {
 		}
 		line := nullTerminatedString(rec[utmpxLineOffset : utmpxLineOffset+utmpxLineSize])
 		if line == "" {
+			continue
+		}
+		// Defense in depth: reject anything that isn't a canonical
+		// TTY name shape. A hostile utmp writer could otherwise
+		// inject `../tmp/somefifo` and hang the daemon on its open.
+		if !validUtmpLine.MatchString(line) {
+			_, _ = fmt.Fprintf(logTo, "utmp: skipping non-canonical ut_line %q\n", line)
 			continue
 		}
 		device := "/dev/" + line

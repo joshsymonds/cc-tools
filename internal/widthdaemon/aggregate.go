@@ -12,9 +12,15 @@ func Aggregate(sources []Source) []Source {
 		return nil
 	}
 
-	tmuxTTYs := make(map[string]struct{}, len(sources))
-	tmuxSources := make([]Source, 0, len(sources))
-	ttySources := make([]Source, 0, len(sources))
+	tmuxCount := 0
+	for _, s := range sources {
+		if s.Kind == SourceKindTmux {
+			tmuxCount++
+		}
+	}
+	tmuxTTYs := make(map[string]struct{}, tmuxCount)
+	tmuxSources := make([]Source, 0, tmuxCount)
+	ttySources := make([]Source, 0, len(sources)-tmuxCount)
 
 	for _, s := range sources {
 		if s.Kind == SourceKindTmux {

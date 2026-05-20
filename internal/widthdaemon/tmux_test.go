@@ -38,7 +38,7 @@ func TestTmuxSource_Detect_SingleClient(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("Detect: want 1 source, got %d (%+v)", len(got), got)
 	}
-	want := Source{Kind: "tmux", TTY: "/dev/pts/3", Width: 200, Session: "main"}
+	want := Source{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 200, Session: "main"}
 	if got[0] != want {
 		t.Errorf("Detect: got %+v, want %+v", got[0], want)
 	}

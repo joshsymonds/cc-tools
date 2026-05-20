@@ -191,6 +191,65 @@ func TestUtmpSource_Detect_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestUtmpSource_Detect_RejectsNonCanonicalLine(t *testing.T) {
+	// A hostile utmp writer (root or members of the `utmp` group on
+	// some distros) could inject a ut_line containing path traversal
+	// or unexpected characters. The daemon must refuse to concatenate
+	// such values into a device path.
+	cases := []string{
+		"../tmp/somefifo",
+		"pts/3/extra",
+		"foo bar",
+		"pts/",
+		"pts/3a",
+	}
+	for _, badLine := range cases {
+		t.Run(badLine, func(t *testing.T) {
+			path := writeTempUtmp(t, func(b *bytes.Buffer) {
+				writeUtmpRecord(t, b, utmpxTypeUserProcess, badLine)
+			})
+			var logBuf bytes.Buffer
+			// Rig the winsize reader to panic if ever called — the
+			// validator must reject the line before any open.
+			wsr := &fakeWinsizeReader{cols: map[string]uint16{}}
+			src := &UtmpSource{Path: path, WinsizeReader: wsr, LogWriter: &logBuf}
+
+			got, err := src.Detect(context.Background())
+			if err != nil {
+				t.Fatalf("Detect: unexpected error %v", err)
+			}
+			if len(got) != 0 {
+				t.Errorf("Detect: want empty (validator rejected line), got %+v", got)
+			}
+			if !strings.Contains(logBuf.String(), "non-canonical") {
+				t.Errorf("Detect: rejection should be logged; log was %q", logBuf.String())
+			}
+		})
+	}
+}
+
+func TestUtmpSource_Detect_AcceptsCanonicalLines(t *testing.T) {
+	cases := []string{"pts/0", "pts/3", "pts/42", "tty1", "tty2", "tty"}
+	for _, goodLine := range cases {
+		t.Run(goodLine, func(t *testing.T) {
+			path := writeTempUtmp(t, func(b *bytes.Buffer) {
+				writeUtmpRecord(t, b, utmpxTypeUserProcess, goodLine)
+			})
+			device := "/dev/" + goodLine
+			wsr := &fakeWinsizeReader{cols: map[string]uint16{device: 80}}
+			src := &UtmpSource{Path: path, WinsizeReader: wsr}
+
+			got, err := src.Detect(context.Background())
+			if err != nil {
+				t.Fatalf("Detect: unexpected error %v", err)
+			}
+			if len(got) != 1 || got[0].TTY != device {
+				t.Errorf("Detect: canonical line %q rejected; got %+v", goodLine, got)
+			}
+		})
+	}
+}
+
 func TestUtmpSource_Detect_PartialTrailingRecord(t *testing.T) {
 	// A file whose size is not a multiple of 384 should not panic; we
 	// parse the full records we can and ignore the trailing fragment.

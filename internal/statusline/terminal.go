@@ -3,10 +3,12 @@ package statusline
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -18,8 +20,23 @@ import (
 //nolint:gochecknoglobals // intentional test seam; never written outside tests
 var (
 	widthCacheFile       = "/dev/shm/cc-tools/parent-width"
-	widthCacheStaleAfter = 5 * time.Minute
+	widthCacheStaleAfter = resolveCacheStaleAfter()
 )
+
+// resolveCacheStaleAfter lets users tune the stale-cache threshold
+// via CC_TOOLS_WIDTH_CACHE_STALE (Go duration string). Defaults to
+// 5 minutes — short enough that a long-dead daemon doesn't keep
+// poisoning the statusline, long enough that brief daemon restarts
+// don't cause a flicker.
+func resolveCacheStaleAfter() time.Duration {
+	const defaultStale = 5 * time.Minute
+	if raw := os.Getenv("CC_TOOLS_WIDTH_CACHE_STALE"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultStale
+}
 
 // DefaultTerminalWidth provides terminal width detection.
 type DefaultTerminalWidth struct{}
@@ -123,13 +140,24 @@ func (t *DefaultTerminalWidth) getTestOverride() int {
 // widthdaemon updates on every detected change. Returns 0 when:
 //   - the file doesn't exist (daemon not running)
 //   - the file mtime is older than widthCacheStaleAfter (daemon dead)
+//   - the path is a symlink (defense against /dev/shm squatting)
 //   - the contents don't parse as a positive integer
 //
 // Positioned in the priority list after the real TTY methods so a
 // process that *does* have a TTY uses its own size; the cache is only
 // the source of truth for the headless dispatched-agent case.
+//
+// Uses a single open with O_NOFOLLOW + fstat so a symlink-swap attack
+// (planting a symlink at the cache path on world-writable /dev/shm)
+// fails closed and so we make one syscall instead of stat+read.
 func (t *DefaultTerminalWidth) getWidthCache() int {
-	info, err := os.Stat(widthCacheFile)
+	f, err := os.OpenFile(widthCacheFile, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
 	if err != nil {
 		return 0
 	}
@@ -139,7 +167,7 @@ func (t *DefaultTerminalWidth) getWidthCache() int {
 		}
 		return 0
 	}
-	data, err := os.ReadFile(widthCacheFile)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return 0
 	}
