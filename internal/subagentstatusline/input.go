@@ -10,6 +10,12 @@ import (
 	"io"
 )
 
+// maxInputBytes bounds how much we'll read from stdin. Claude's typical
+// subagentStatusLine payload is a few KB even for 50 active rows;
+// 1 MB is generous insurance against a misbehaving parent process
+// driving memory growth.
+const maxInputBytes = 1 << 20 // 1 MiB
+
 // Input is the top-level JSON blob Claude pipes on stdin.
 //
 // Only the fields cc-tools renders against are listed; the JSON
@@ -66,14 +72,16 @@ type Task struct {
 // Input. Tasks is normalized to a non-nil empty slice if the key is
 // missing or null. Errors are wrapped with `parse:` for easy
 // identification at the caller.
+//
+// Streams through json.Decoder rather than ReadAll-then-Unmarshal so
+// peak memory is one parsed Input, not raw bytes + parsed struct.
+// Bounded by maxInputBytes via io.LimitReader so a misbehaving parent
+// can't drive the daemon into the OOM killer.
 func Parse(r io.Reader) (*Input, error) {
-	raw, err := io.ReadAll(r)
-	if err != nil {
-		return nil, fmt.Errorf("parse: read: %w", err)
-	}
+	dec := json.NewDecoder(io.LimitReader(r, maxInputBytes))
 	var in Input
-	if unmarshalErr := json.Unmarshal(raw, &in); unmarshalErr != nil {
-		return nil, fmt.Errorf("parse: %w", unmarshalErr)
+	if err := dec.Decode(&in); err != nil {
+		return nil, fmt.Errorf("parse: %w", err)
 	}
 	if in.Tasks == nil {
 		in.Tasks = []Task{}

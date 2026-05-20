@@ -20,11 +20,17 @@ func Render(r io.Reader, w io.Writer, contextWindow int, env EnvReader) error {
 	if err != nil {
 		return fmt.Errorf("render: %w", err)
 	}
+	// Snapshot env ONCE, not per-task. DefaultEnvReader.Get for
+	// AWS_PROFILE re-opens the state file on every call; with N tasks
+	// that's N file reads per tick. The values can't differ across
+	// tasks in a single invocation, so a snapshot is correct and cheap.
+	snap := SnapshotEnv(env)
+
 	decorations := make([]Decoration, 0, len(in.Tasks))
 	for _, task := range in.Tasks {
 		decorations = append(decorations, Decoration{
 			ID:      task.ID,
-			Content: BuildContent(task, in.Columns, contextWindow, env),
+			Content: BuildContent(task, in.Columns, contextWindow, snap),
 		})
 	}
 	if writeErr := WriteDecorations(w, decorations); writeErr != nil {

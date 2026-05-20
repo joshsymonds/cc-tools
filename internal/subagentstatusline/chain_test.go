@@ -99,7 +99,7 @@ func TestBuildContent_Minimal(t *testing.T) {
 	// Use a temp dir with no .git and no env — only dir + context chips.
 	cwd := t.TempDir()
 	task := Task{ID: "t1", TokenCount: 100_000, CWD: cwd}
-	got := BuildContent(task, 200, 1_000_000, mapEnvReader{})
+	got := BuildContent(task, 200, 1_000_000, EnvSnapshot{})
 
 	// Directory chip body must appear (raw cwd, since not under fake home).
 	if !strings.Contains(got, cwd) {
@@ -118,12 +118,12 @@ func TestBuildContent_Minimal(t *testing.T) {
 func TestBuildContent_AllChips(t *testing.T) {
 	cwd := writeFakeGitHEAD(t, "ref: refs/heads/main\n")
 	task := Task{ID: "t1", TokenCount: 500_000, CWD: cwd}
-	env := mapEnvReader{
-		"AWS_PROFILE":           "staging",
-		"CLOUDSDK_CORE_PROJECT": "my-project",
-		"KUBE_CONTEXT":          "my-cluster",
+	snap := EnvSnapshot{
+		AWSProfile:    "staging",
+		GCloudProject: "my-project",
+		K8sContext:    "my-cluster",
 	}
-	got := BuildContent(task, 200, 1_000_000, env)
+	got := BuildContent(task, 200, 1_000_000, snap)
 
 	for _, want := range []string{"main", "staging", "my-project", "my-cluster", "50%"} {
 		if !strings.Contains(got, want) {
@@ -135,14 +135,14 @@ func TestBuildContent_AllChips(t *testing.T) {
 func TestBuildContent_WidthPressureDropsK8sFirst(t *testing.T) {
 	cwd := writeFakeGitHEAD(t, "ref: refs/heads/main\n")
 	task := Task{ID: "t1", TokenCount: 500_000, CWD: cwd}
-	env := mapEnvReader{
-		"AWS_PROFILE":           "staging",
-		"CLOUDSDK_CORE_PROJECT": "my-project",
-		"KUBE_CONTEXT":          "my-cluster",
+	snap := EnvSnapshot{
+		AWSProfile:    "staging",
+		GCloudProject: "my-project",
+		K8sContext:    "my-cluster",
 	}
 
 	// 40 cells: tight — should drop k8s first.
-	got := BuildContent(task, 40, 1_000_000, env)
+	got := BuildContent(task, 40, 1_000_000, snap)
 	if strings.Contains(got, "my-cluster") {
 		t.Errorf("at 40 cols, k8s chip should be dropped; got %q", got)
 	}
@@ -155,14 +155,14 @@ func TestBuildContent_WidthPressureDropsK8sFirst(t *testing.T) {
 func TestBuildContent_WidthPressureKeepsOnlyDirectory(t *testing.T) {
 	cwd := writeFakeGitHEAD(t, "ref: refs/heads/main\n")
 	task := Task{ID: "t1", TokenCount: 500_000, CWD: cwd}
-	env := mapEnvReader{
-		"AWS_PROFILE":           "staging",
-		"CLOUDSDK_CORE_PROJECT": "my-project",
-		"KUBE_CONTEXT":          "my-cluster",
+	snap := EnvSnapshot{
+		AWSProfile:    "staging",
+		GCloudProject: "my-project",
+		K8sContext:    "my-cluster",
 	}
 
 	// 15 cells is below what dir+context need; only dir survives.
-	got := BuildContent(task, 15, 1_000_000, env)
+	got := BuildContent(task, 15, 1_000_000, snap)
 	if strings.Contains(got, "50%") {
 		t.Errorf("at 15 cols, context should be dropped; got %q", got)
 	}
@@ -186,7 +186,7 @@ func TestBuildContent_DirectoryNeverDropped(t *testing.T) {
 	task := Task{ID: "t1", CWD: cwd}
 	// Even at columns=1, we still emit the directory chip (it'll overflow,
 	// but Claude renders it).
-	got := BuildContent(task, 1, 1_000_000, mapEnvReader{})
+	got := BuildContent(task, 1, 1_000_000, EnvSnapshot{})
 	if got == "" {
 		t.Errorf("BuildContent should never return empty when CWD is set, got empty")
 	}
@@ -199,7 +199,7 @@ func TestBuildContent_ZeroContextWindow(t *testing.T) {
 	cwd := t.TempDir()
 	task := Task{ID: "t1", TokenCount: 500_000, CWD: cwd}
 	// 0 contextWindow should default to 1_000_000, giving 50%.
-	got := BuildContent(task, 200, 0, mapEnvReader{})
+	got := BuildContent(task, 200, 0, EnvSnapshot{})
 	if !strings.Contains(got, "50%") {
 		t.Errorf("BuildContent with contextWindow=0 should default to 1M, expected 50%%, got %q", got)
 	}

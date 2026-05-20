@@ -26,8 +26,14 @@ var version = "dev"
 func main() {
 	out := output.NewTerminal(os.Stdout, os.Stderr)
 
-	// Debug logging - log all invocations to a file
-	debugLog()
+	// Debug logging — log all invocations to a file. Gated behind the
+	// CC_TOOLS_DEBUG env var so hot-path subcommands (statusline,
+	// subagent-statusline, width-daemon) don't unconditionally touch
+	// disk + grow an unbounded log on every tick. Set CC_TOOLS_DEBUG=1
+	// to capture invocations for diagnosis.
+	if os.Getenv("CC_TOOLS_DEBUG") == "1" {
+		debugLog()
+	}
 
 	if len(os.Args) < minArgs {
 		printUsage(out)

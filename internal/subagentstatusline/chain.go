@@ -1,33 +1,60 @@
 package subagentstatusline
 
 import (
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/Veraticus/cc-tools/internal/statusline"
 )
 
-// widthMargin reserves room for Claude's row chrome (the agent name
-// label, selection indicator, etc.). Empirically ~4 cells is enough;
-// under-reserving causes wrap, over-reserving wastes chip space.
+// widthMargin reserves room for Claude's row chrome that lives outside
+// the subagentStatusLine output. Empirically measured against Claude
+// 2.1.145 — the row reserves: 2 cells for the selection indicator
+// glyph + space, and 2 cells of left/right padding around the
+// decoration. Total budget = 4 cells. If a future Claude version
+// changes its row chrome the chain will start wrapping; that's the
+// signal to retune this constant.
 const widthMargin = 4
 
-// defaultContextWindow matches the user's Opus 1M default. Callers can
-// override via the contextWindow parameter to BuildContent.
-const defaultContextWindow = 1_000_000
+// DefaultContextWindow matches the user's Opus 1M default. Exported so
+// the cmd/ wrapper consumes one declaration instead of duplicating.
+const DefaultContextWindow = 1_000_000
 
-// csiRegex matches ANSI CSI sequences like `\033[38;2;180;190;254m`.
-// Used to strip them when measuring printable width. Compiled once at
-// package init.
-var csiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+// chainBuilderSize is the initial strings.Builder capacity for one
+// chain. Picked so common chains (4-5 chips with ANSI escapes) need at
+// most one Grow. Each chip body is ~30 chars + ~60 chars of ANSI per
+// transition; 256 covers ~3-4 chips comfortably.
+const chainBuilderSize = 256
 
-// visibleWidth returns the displayed cell count of s, ignoring CSI
-// escapes. Powerline glyphs and block characters are single-cell in
-// any NerdFont, so rune count after escape stripping equals display
-// width for our chip vocabulary.
+// visibleWidth returns the displayed cell count of s, ignoring ANSI
+// CSI sequences. Single-pass, allocation-free: walks runes, skipping
+// any sequence that starts with ESC '[' until the terminating byte
+// (a letter A-Za-z) closes the CSI. Powerline glyphs and block chars
+// are single-cell in NerdFonts, so rune count after CSI stripping
+// equals display width for our vocabulary.
 func visibleWidth(s string) int {
-	return utf8.RuneCountInString(csiRegex.ReplaceAllString(s, ""))
+	const esc = 0x1b
+	count := 0
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if c == esc && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			// Consume until a final byte in [A-Za-z] closes the CSI.
+			for i < len(s) {
+				b := s[i]
+				i++
+				if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') {
+					break
+				}
+			}
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(s[i:])
+		count++
+		i += size
+	}
+	return count
 }
 
 // assembleChain renders chips as an ANSI string framed by LeftCurve
@@ -36,22 +63,29 @@ func visibleWidth(s string) int {
 // each interior chevron has bg=next-chip-color, fg=prev-chip-color so
 // the glyph appears to "spill" the previous color into the next chip.
 //
+// A reset (NC) is emitted between chip body and the following chevron
+// for parity with internal/statusline/render.go's renderComponents.
+// Equivalent visible output today; defends against future ANSI-state
+// leakage if a chip body ever embeds its own escapes.
+//
 // Returns "" if chips is empty.
 func assembleChain(chips []Chip) string {
 	if len(chips) == 0 {
 		return ""
 	}
 	var b strings.Builder
+	b.Grow(chainBuilderSize)
 
 	// Leading curve: terminal-default bg, first chip's color in fg.
 	b.WriteString(chips[0].Color.FG())
 	b.WriteString(statusline.LeftCurve)
 
 	for i, chip := range chips {
-		// Chip body: chip's bg + dark base fg + padded body.
+		// Chip body: chip's bg + dark base fg + padded body + reset.
 		b.WriteString(chip.Color.BG())
 		b.WriteString(palette.BaseFG())
 		b.WriteString(chip.Body)
+		b.WriteString(palette.NC())
 
 		// Separator to the next chip, if any.
 		if i+1 < len(chips) {
@@ -59,12 +93,11 @@ func assembleChain(chips []Chip) string {
 			b.WriteString(next.Color.BG())
 			b.WriteString(chip.Color.FG())
 			b.WriteString(statusline.LeftChevron)
+			b.WriteString(palette.NC())
 		}
 	}
 
-	// Trailing curve: clear the chip's bg first so the curve sits on
-	// the terminal default; last chip's color in fg.
-	b.WriteString(palette.NC())
+	// Trailing curve: last chip's color in fg on terminal default bg.
 	b.WriteString(chips[len(chips)-1].Color.FG())
 	b.WriteString(statusline.RightCurve)
 	b.WriteString(palette.NC())
@@ -77,12 +110,12 @@ func assembleChain(chips []Chip) string {
 // budget. Chip selection runs in epic-defined order; drops happen
 // right-to-left (k8s first, dir never).
 //
-// contextWindow defaults to 1_000_000 (Opus 1M) when 0 or negative.
-// env supplies AWS_PROFILE, CLOUDSDK_CORE_PROJECT / GOOGLE_CLOUD_PROJECT,
-// KUBE_CONTEXT / KUBERNETES_CONTEXT.
-func BuildContent(task Task, columns, contextWindow int, env EnvReader) string {
+// contextWindow defaults to DefaultContextWindow (Opus 1M) when 0 or
+// negative. snap holds the env values shared across all tasks in this
+// invocation — read once per invocation, not per task.
+func BuildContent(task Task, columns, contextWindow int, snap EnvSnapshot) string {
 	if contextWindow <= 0 {
-		contextWindow = defaultContextWindow
+		contextWindow = DefaultContextWindow
 	}
 
 	// Gather all candidate chips in display order. Each entry is
@@ -90,9 +123,9 @@ func BuildContent(task Task, columns, contextWindow int, env EnvReader) string {
 	dir := renderDirectoryChip(task.CWD)
 	ctx := renderContextChip(task.TokenCount, contextWindow)
 	branch, branchOK := renderBranchChip(task.CWD)
-	aws, awsOK := renderAWSChip(env)
-	gcloud, gcloudOK := renderGCloudChip(env)
-	k8s, k8sOK := renderK8sChip(env)
+	aws, awsOK := renderAWSChip(snap.AWSProfile)
+	gcloud, gcloudOK := renderGCloudChip(snap.GCloudProject)
+	k8s, k8sOK := renderK8sChip(snap.K8sContext)
 
 	// Assemble candidate chip list in display order.
 	type opt struct {

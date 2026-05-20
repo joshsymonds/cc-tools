@@ -7,15 +7,19 @@ import (
 	"testing"
 )
 
-// mapEnvReader is a tiny EnvReader stub for tests.
+// mapEnvReader is a tiny EnvReader stub for tests that exercise the
+// SnapshotEnv code path; chip-level tests now take string args
+// directly.
 type mapEnvReader map[string]string
 
 func (m mapEnvReader) Get(key string) string { return m[key] }
 
 func TestRenderDirectoryChip_EmptyCWD(t *testing.T) {
+	// When cwd is empty, we fall back to the process's working dir.
+	// Body should NOT contain "?" because os.Getwd succeeds in tests.
 	got := renderDirectoryChip("")
-	if !strings.Contains(got.Body, "?") {
-		t.Errorf("empty cwd should render as '?', got Body=%q", got.Body)
+	if strings.Contains(got.Body, "?") {
+		t.Errorf("empty cwd should fall back to os.Getwd (not '?'), got Body=%q", got.Body)
 	}
 	if got.Color != ColorLavender {
 		t.Errorf("color = %v, want ColorLavender", got.Color)
@@ -63,12 +67,20 @@ func TestRenderDirectoryChip_Root(t *testing.T) {
 
 func TestRenderDirectoryChip_PaddingSpaces(t *testing.T) {
 	got := renderDirectoryChip("/tmp/x")
-	// Body must have leading and trailing space for chevron-chain seating.
 	if !strings.HasPrefix(got.Body, " ") {
 		t.Errorf("Body should start with a space, got %q", got.Body)
 	}
 	if !strings.HasSuffix(got.Body, " ") {
 		t.Errorf("Body should end with a space, got %q", got.Body)
+	}
+}
+
+func TestRenderDirectoryChip_StripsControlChars(t *testing.T) {
+	// A poisoned cwd containing ANSI escape bytes must not leak into
+	// the chip body.
+	got := renderDirectoryChip("/tmp/\x1b[2Jevil")
+	if strings.Contains(got.Body, "\x1b") {
+		t.Errorf("Body must strip ESC bytes; got %q", got.Body)
 	}
 }
 
@@ -90,7 +102,7 @@ func TestRenderContextChip_Zero(t *testing.T) {
 
 func TestRenderContextChip_FortyPercent(t *testing.T) {
 	got := renderContextChip(400_000, 1_000_000)
-	// 40% / 20 = 2 quintile blocks filled
+	// 40% with round(40/20)=2 → 2 filled, 3 empty.
 	filled := strings.Count(got.Body, "▰")
 	empty := strings.Count(got.Body, "▱")
 	if filled != 2 || empty != 3 {
@@ -98,6 +110,29 @@ func TestRenderContextChip_FortyPercent(t *testing.T) {
 	}
 	if got.Color != ColorYellow {
 		t.Errorf("40%% color = %v, want ColorYellow", got.Color)
+	}
+}
+
+func TestRenderContextChip_QuintileRounding(t *testing.T) {
+	// Epic requirement: quintile count uses ROUND, not floor.
+	// 17% → round(0.85) = 1; floor would give 0. Catches the bug
+	// that conformance-G1 flagged.
+	got := renderContextChip(170_000, 1_000_000)
+	filled := strings.Count(got.Body, "▰")
+	if filled != 1 {
+		t.Errorf("17%% (round) should give 1 filled block, got %d (Body=%q)", filled, got.Body)
+	}
+	// 35% → round(1.75) = 2; floor would give 1.
+	got = renderContextChip(350_000, 1_000_000)
+	filled = strings.Count(got.Body, "▰")
+	if filled != 2 {
+		t.Errorf("35%% (round) should give 2 filled blocks, got %d (Body=%q)", filled, got.Body)
+	}
+	// 9% → round(0.45) = 0 (under .5). Exercises the rounds-down case.
+	got = renderContextChip(90_000, 1_000_000)
+	filled = strings.Count(got.Body, "▰")
+	if filled != 0 {
+		t.Errorf("9%% (round) should give 0 filled blocks, got %d (Body=%q)", filled, got.Body)
 	}
 }
 
@@ -152,7 +187,6 @@ func TestRenderContextChip_NegativeTokens(t *testing.T) {
 }
 
 func TestRenderContextChip_ThresholdTransitions(t *testing.T) {
-	// Verify each boundary transition.
 	cases := []struct {
 		pct       int
 		wantColor Color
@@ -178,7 +212,6 @@ func TestRenderContextChip_ThresholdTransitions(t *testing.T) {
 }
 
 func TestRenderContextChip_AlternateWindow(t *testing.T) {
-	// 200k context (Sonnet-style) — 100k tokens = 50% = Yellow.
 	got := renderContextChip(100_000, 200_000)
 	if got.Color != ColorYellow {
 		t.Errorf("100k/200k color = %v, want ColorYellow (50%%)", got.Color)
@@ -186,17 +219,16 @@ func TestRenderContextChip_AlternateWindow(t *testing.T) {
 	if !strings.Contains(got.Body, "50%") {
 		t.Errorf("Body should contain 50%%, got %q", got.Body)
 	}
-	// 2 quintile blocks filled (50/20 = 2).
+	// 50% round = 3 (round(2.5) = 3 half-up). Existing test expected
+	// 2 (floor). Update: spec mandates round.
 	filled := strings.Count(got.Body, "▰")
-	if filled != 2 {
-		t.Errorf("50%% filled = %d, want 2", filled)
+	if filled != 3 {
+		t.Errorf("50%% round filled = %d, want 3", filled)
 	}
 }
 
 func TestRenderContextChip_ZeroWindow(t *testing.T) {
-	// Defensive: contextWindow=0 should not divide-by-zero.
 	got := renderContextChip(100, 0)
-	// With window clamped to 1, 100/1 = 100% → Red, 5 blocks.
 	if got.Color != ColorRed {
 		t.Errorf("zero-window color = %v, want ColorRed (clamped)", got.Color)
 	}
@@ -213,7 +245,6 @@ func TestRenderContextChip_PaddingSpaces(t *testing.T) {
 }
 
 func TestColor_FGBG_Roundtrip(t *testing.T) {
-	// Sanity: each color exposes non-empty FG and BG escape strings.
 	colors := []Color{ColorLavender, ColorGreen, ColorYellow, ColorPeach, ColorRed, ColorPink, ColorTeal}
 	for _, c := range colors {
 		if c.FG() == "" {
@@ -222,7 +253,6 @@ func TestColor_FGBG_Roundtrip(t *testing.T) {
 		if c.BG() == "" {
 			t.Errorf("%v BG() returned empty", c)
 		}
-		// FG and BG must differ (different ANSI selectors: 38 vs 48).
 		if c.FG() == c.BG() {
 			t.Errorf("%v FG and BG should differ", c)
 		}
@@ -263,34 +293,73 @@ func TestRenderBranchChip_DetachedHEAD(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected chip, got !ok")
 	}
-	// Body should contain the 8-char short SHA.
 	if !strings.Contains(got.Body, "abc123de") {
 		t.Errorf("Body should contain 'abc123de' (short SHA), got %q", got.Body)
 	}
-	// Full SHA should NOT appear.
 	if strings.Contains(got.Body, "abc123def456") {
 		t.Errorf("Body should NOT contain full SHA, got %q", got.Body)
 	}
 }
 
+func TestRenderBranchChip_DetachedHEADRejectsNonHex(t *testing.T) {
+	// Defense: if HEAD is a symlink pointed at an arbitrary file
+	// (e.g. /etc/hostname), the first 8 chars might not be hex.
+	// isHexPrefix should refuse to display them as a fake SHA.
+	cwd := writeFakeGitHEAD(t, "vermissian.example.com\n")
+	_, ok := renderBranchChip(cwd)
+	if ok {
+		t.Errorf("expected !ok for non-hex HEAD content")
+	}
+}
+
 func TestRenderBranchChip_NoGitHEAD(t *testing.T) {
-	cwd := t.TempDir() // no .git
+	cwd := t.TempDir()
 	_, ok := renderBranchChip(cwd)
 	if ok {
 		t.Errorf("expected !ok for cwd with no .git, got ok")
 	}
 }
 
-func TestRenderBranchChip_GitIsFile(t *testing.T) {
-	// Worktree-style: .git is a file pointing to the real gitdir.
-	// We don't parse it — treat as no chip.
+func TestRenderBranchChip_WorktreePointer(t *testing.T) {
+	// .git is a file containing `gitdir: <path>`. Should dereference
+	// and read the pointed-to HEAD.
 	cwd := t.TempDir()
-	if err := os.WriteFile(filepath.Join(cwd, ".git"), []byte("gitdir: /elsewhere\n"), 0o600); err != nil {
-		t.Fatalf("write .git file: %v", err)
+	gitDir := filepath.Join(cwd, "actual-gitdir")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/wt-branch\n"), 0o600); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".git"), []byte("gitdir: "+gitDir+"\n"), 0o600); err != nil {
+		t.Fatalf("write .git: %v", err)
+	}
+	got, ok := renderBranchChip(cwd)
+	if !ok {
+		t.Fatalf("expected chip via worktree pointer, got !ok")
+	}
+	if !strings.Contains(got.Body, "wt-branch") {
+		t.Errorf("Body should contain worktree branch name, got %q", got.Body)
+	}
+}
+
+func TestRenderBranchChip_RefusesSymlinkedGit(t *testing.T) {
+	// A symlinked .git is rejected (defense against arbitrary-file
+	// reads via planted symlinks).
+	cwd := t.TempDir()
+	realDir := filepath.Join(cwd, "real.git")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatalf("mkdir realDir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o600); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.Symlink(realDir, filepath.Join(cwd, ".git")); err != nil {
+		t.Fatalf("symlink .git: %v", err)
 	}
 	_, ok := renderBranchChip(cwd)
 	if ok {
-		t.Errorf("expected !ok for .git as file, got ok")
+		t.Errorf("expected !ok for symlinked .git, got ok")
 	}
 }
 
@@ -323,22 +392,33 @@ func TestRenderBranchChip_BranchWithSlashes(t *testing.T) {
 	}
 }
 
-func TestRenderAWSChip_Unset(t *testing.T) {
-	_, ok := renderAWSChip(mapEnvReader{})
+func TestRenderBranchChip_RejectsControlCharsInName(t *testing.T) {
+	// A poisoned HEAD with ANSI escape in the branch name must be
+	// refused — validBranchName rejects control bytes.
+	cwd := writeFakeGitHEAD(t, "ref: refs/heads/x\x1b[2Jevil\n")
+	_, ok := renderBranchChip(cwd)
 	if ok {
-		t.Errorf("expected !ok for unset AWS_PROFILE, got ok")
+		t.Errorf("expected !ok for branch name with control chars")
 	}
 }
 
-func TestRenderAWSChip_Empty(t *testing.T) {
-	_, ok := renderAWSChip(mapEnvReader{"AWS_PROFILE": ""})
+func TestRenderBranchChip_RejectsSpacesInName(t *testing.T) {
+	cwd := writeFakeGitHEAD(t, "ref: refs/heads/ a b\n")
+	_, ok := renderBranchChip(cwd)
 	if ok {
-		t.Errorf("expected !ok for empty AWS_PROFILE, got ok")
+		t.Errorf("expected !ok for branch name with leading space")
+	}
+}
+
+func TestRenderAWSChip_Unset(t *testing.T) {
+	_, ok := renderAWSChip("")
+	if ok {
+		t.Errorf("expected !ok for empty profile, got ok")
 	}
 }
 
 func TestRenderAWSChip_ProdLowercase(t *testing.T) {
-	got, ok := renderAWSChip(mapEnvReader{"AWS_PROFILE": "prod-account"})
+	got, ok := renderAWSChip("prod-account")
 	if !ok {
 		t.Fatalf("expected chip, got !ok")
 	}
@@ -351,71 +431,72 @@ func TestRenderAWSChip_ProdLowercase(t *testing.T) {
 }
 
 func TestRenderAWSChip_ProdUppercase(t *testing.T) {
-	got, _ := renderAWSChip(mapEnvReader{"AWS_PROFILE": "PRODUCTION"})
+	got, _ := renderAWSChip("PRODUCTION")
 	if got.Color != ColorPeach {
 		t.Errorf("PRODUCTION color = %v, want ColorPeach (case-insensitive 'prod')", got.Color)
 	}
 }
 
 func TestRenderAWSChip_NonProd(t *testing.T) {
-	got, _ := renderAWSChip(mapEnvReader{"AWS_PROFILE": "staging"})
+	got, _ := renderAWSChip("staging")
 	if got.Color != ColorTeal {
 		t.Errorf("staging color = %v, want ColorTeal", got.Color)
 	}
 }
 
 func TestRenderAWSChip_SubstringProd(t *testing.T) {
-	got, _ := renderAWSChip(mapEnvReader{"AWS_PROFILE": "my-dev-prod"})
+	got, _ := renderAWSChip("my-dev-prod")
 	if got.Color != ColorPeach {
 		t.Errorf("'my-dev-prod' color = %v, want ColorPeach (contains 'prod')", got.Color)
 	}
 }
 
-func TestRenderGCloudChip_BothUnset(t *testing.T) {
-	_, ok := renderGCloudChip(mapEnvReader{})
-	if ok {
-		t.Errorf("expected !ok for both gcloud env vars unset")
+func TestRenderAWSChip_StripsControlChars(t *testing.T) {
+	got, ok := renderAWSChip("prod\x1b[2Jevil")
+	if !ok {
+		t.Fatalf("expected chip after stripping, got !ok")
+	}
+	if strings.Contains(got.Body, "\x1b") {
+		t.Errorf("Body must strip ESC bytes; got %q", got.Body)
+	}
+	// stripControl removes the ESC byte; the literal characters `[2J`
+	// remain (they're not control bytes themselves — only the leading
+	// 0x1b makes them an ANSI sequence). That's correct: stripping
+	// the escape neutralizes the injection without losing data.
+	if !strings.Contains(got.Body, "prod[2Jevil") {
+		t.Errorf("Body should contain 'prod[2Jevil' (ESC stripped, rest kept), got %q", got.Body)
 	}
 }
 
-func TestRenderGCloudChip_CloudSDKWins(t *testing.T) {
-	got, ok := renderGCloudChip(mapEnvReader{
-		"CLOUDSDK_CORE_PROJECT": "primary",
-		"GOOGLE_CLOUD_PROJECT":  "fallback",
-	})
+func TestRenderGCloudChip_Unset(t *testing.T) {
+	_, ok := renderGCloudChip("")
+	if ok {
+		t.Errorf("expected !ok for empty project")
+	}
+}
+
+func TestRenderGCloudChip_Set(t *testing.T) {
+	got, ok := renderGCloudChip("my-project")
 	if !ok {
 		t.Fatalf("expected chip, got !ok")
 	}
-	if !strings.Contains(got.Body, "primary") {
-		t.Errorf("Body should prefer CLOUDSDK_CORE_PROJECT, got %q", got.Body)
-	}
-	if strings.Contains(got.Body, "fallback") {
-		t.Errorf("Body should NOT contain fallback value when CLOUDSDK is set, got %q", got.Body)
+	if !strings.Contains(got.Body, "my-project") {
+		t.Errorf("Body should contain project, got %q", got.Body)
 	}
 	if got.Color != ColorPeach {
 		t.Errorf("color = %v, want ColorPeach", got.Color)
 	}
 }
 
-func TestRenderGCloudChip_GoogleFallback(t *testing.T) {
-	got, ok := renderGCloudChip(mapEnvReader{"GOOGLE_CLOUD_PROJECT": "fallback"})
-	if !ok {
-		t.Fatalf("expected chip, got !ok")
-	}
-	if !strings.Contains(got.Body, "fallback") {
-		t.Errorf("Body should contain GOOGLE_CLOUD_PROJECT value, got %q", got.Body)
-	}
-}
-
 func TestRenderK8sChip_Unset(t *testing.T) {
-	_, ok := renderK8sChip(mapEnvReader{})
+	_, ok := renderK8sChip("")
 	if ok {
-		t.Errorf("expected !ok for both k8s env vars unset")
+		t.Errorf("expected !ok for empty context")
 	}
 }
 
-func TestRenderK8sChip_KubeContext(t *testing.T) {
-	got, ok := renderK8sChip(mapEnvReader{"KUBE_CONTEXT": "eks-prod"})
+func TestRenderK8sChip_Set(t *testing.T) {
+	got, ok := renderK8sChip("eks-prod")
 	if !ok {
 		t.Fatalf("expected chip, got !ok")
 	}
@@ -427,12 +508,44 @@ func TestRenderK8sChip_KubeContext(t *testing.T) {
 	}
 }
 
-func TestRenderK8sChip_KubernetesContext(t *testing.T) {
-	got, ok := renderK8sChip(mapEnvReader{"KUBERNETES_CONTEXT": "gke-staging"})
-	if !ok {
-		t.Fatalf("expected chip, got !ok")
+func TestSnapshotEnv_AllKeys(t *testing.T) {
+	env := mapEnvReader{
+		"AWS_PROFILE":           "prod",
+		"CLOUDSDK_CORE_PROJECT": "primary",
+		"KUBE_CONTEXT":          "eks",
 	}
-	if !strings.Contains(got.Body, "gke-staging") {
-		t.Errorf("Body should contain context, got %q", got.Body)
+	snap := SnapshotEnv(env)
+	if snap.AWSProfile != "prod" || snap.GCloudProject != "primary" || snap.K8sContext != "eks" {
+		t.Errorf("SnapshotEnv: %+v", snap)
+	}
+}
+
+func TestSnapshotEnv_FallbackKeys(t *testing.T) {
+	env := mapEnvReader{
+		"GOOGLE_CLOUD_PROJECT": "fallback",
+		"KUBERNETES_CONTEXT":   "k8s-fallback",
+	}
+	snap := SnapshotEnv(env)
+	if snap.GCloudProject != "fallback" {
+		t.Errorf("expected GOOGLE_CLOUD_PROJECT fallback, got %q", snap.GCloudProject)
+	}
+	if snap.K8sContext != "k8s-fallback" {
+		t.Errorf("expected KUBERNETES_CONTEXT fallback, got %q", snap.K8sContext)
+	}
+}
+
+func TestSnapshotEnv_PrimaryWins(t *testing.T) {
+	env := mapEnvReader{
+		"CLOUDSDK_CORE_PROJECT": "primary",
+		"GOOGLE_CLOUD_PROJECT":  "fallback",
+		"KUBE_CONTEXT":          "primary-k8s",
+		"KUBERNETES_CONTEXT":    "fallback-k8s",
+	}
+	snap := SnapshotEnv(env)
+	if snap.GCloudProject != "primary" {
+		t.Errorf("CLOUDSDK should win, got %q", snap.GCloudProject)
+	}
+	if snap.K8sContext != "primary-k8s" {
+		t.Errorf("KUBE_CONTEXT should win, got %q", snap.K8sContext)
 	}
 }

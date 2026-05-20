@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
@@ -8,8 +9,6 @@ import (
 	"github.com/Veraticus/cc-tools/internal/statusline"
 	"github.com/Veraticus/cc-tools/internal/subagentstatusline"
 )
-
-const subagentDefaultContextWindow = 1_000_000
 
 func runSubagentStatuslineCommand() {
 	code := subagentStatuslineMain()
@@ -22,15 +21,24 @@ func runSubagentStatuslineCommand() {
 // before the outer os.Exit (gocritic exitAfterDefer pattern, matching
 // width_daemon.go).
 func subagentStatuslineMain() int {
-	contextWindow := subagentDefaultContextWindow
+	contextWindow := subagentstatusline.DefaultContextWindow
 	if raw := os.Getenv("CC_TOOLS_SUBAGENT_CONTEXT_WINDOW"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
 			contextWindow = n
 		}
 	}
 	env := &statusline.DefaultEnvReader{}
-	if err := subagentstatusline.Render(os.Stdin, os.Stdout, contextWindow, env); err != nil {
+
+	// Buffer stdout: WriteDecorations does one Write per decoration;
+	// pairing it with a bufio.Writer collapses N writes into one
+	// flush syscall regardless of how many tasks Claude passed.
+	bw := bufio.NewWriter(os.Stdout)
+	if err := subagentstatusline.Render(os.Stdin, bw, contextWindow, env); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "subagent-statusline: %v\n", err)
+		return 1
+	}
+	if flushErr := bw.Flush(); flushErr != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "subagent-statusline: flush: %v\n", flushErr)
 		return 1
 	}
 	return 0
