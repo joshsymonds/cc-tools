@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
+	"time"
 )
 
 const (
@@ -80,6 +81,32 @@ func (w *Writer) Write(width int, sources []Source) error {
 	}
 	if writeErr := writeFileAtomic(dir, widthsJSONFile, jsonBytes); writeErr != nil {
 		return fmt.Errorf("write %s: %w", widthsJSONFile, writeErr)
+	}
+	return nil
+}
+
+// Heartbeat updates the cache files' mtime without rewriting content.
+// Called by the daemon on every tick where the width is unchanged so
+// downstream staleness checks (statusline's 5-min gate) can tell the
+// daemon is alive even when the value has been stable for a long time.
+//
+// No-op (returns nil) when the cache files don't exist yet — the
+// first Write will create them. Refuses to touch a foreign-owned
+// cache directory for the same reason Write does.
+func (w *Writer) Heartbeat() error {
+	dir := w.resolveDir()
+	if err := ensureOwnedDir(dir); err != nil {
+		return fmt.Errorf("heartbeat prepare %s: %w", dir, err)
+	}
+	now := time.Now()
+	for _, name := range []string{parentWidthFile, widthsJSONFile} {
+		path := filepath.Join(dir, name)
+		if err := os.Chtimes(path, now, now); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("heartbeat chtimes %s: %w", path, err)
+		}
 	}
 	return nil
 }

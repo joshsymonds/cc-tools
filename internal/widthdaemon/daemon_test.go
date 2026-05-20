@@ -40,10 +40,12 @@ func (f *fakeDetector) Detect(ctx context.Context) ([]Source, error) {
 	return out, nil
 }
 
-// fakeSink records (width, sources) tuples written by the daemon.
+// fakeSink records (width, sources) tuples written by the daemon
+// plus a separate counter for heartbeat calls.
 type fakeSink struct {
-	mu     sync.Mutex
-	writes []sinkCall
+	mu         sync.Mutex
+	writes     []sinkCall
+	heartbeats int
 }
 
 type sinkCall struct {
@@ -58,10 +60,23 @@ func (f *fakeSink) Write(width int, sources []Source) error {
 	return nil
 }
 
+func (f *fakeSink) Heartbeat() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.heartbeats++
+	return nil
+}
+
 func (f *fakeSink) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.writes)
+}
+
+func (f *fakeSink) heartbeatCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.heartbeats
 }
 
 func (f *fakeSink) lastWidth() int {
@@ -154,6 +169,12 @@ func TestDaemon_Run_StableWidthWritesOnce(t *testing.T) {
 	// the width never changed.
 	if got := sink.callCount(); got != 1 {
 		t.Errorf("stable width should produce exactly 1 write, got %d", got)
+	}
+	// But each subsequent tick MUST call Heartbeat so downstream
+	// staleness checks see the daemon is still alive. We waited for
+	// 8 ticks; 1 went to Write (first), 7 should go to Heartbeat.
+	if got := sink.heartbeatCount(); got < 5 {
+		t.Errorf("stable width should heartbeat on subsequent ticks; got %d heartbeats", got)
 	}
 }
 

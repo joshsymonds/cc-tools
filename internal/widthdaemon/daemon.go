@@ -27,8 +27,17 @@ type Detector interface {
 
 // Sink is what the daemon writes its aggregated result through. In
 // production this is *Writer; tests can substitute a recording fake.
+//
+// Heartbeat is called every tick where the width has not changed
+// since the last Write. It must refresh the cache file's mtime
+// without rewriting content so that downstream staleness checks
+// (statusline's 5-minute window) can distinguish "daemon dead" from
+// "daemon alive, width hasn't changed in a while". A noop is a valid
+// implementation only for in-memory sinks; production sinks must
+// touch the file.
 type Sink interface {
 	Write(width int, sources []Source) error
+	Heartbeat() error
 }
 
 // Config groups everything the daemon needs to run. All fields are
@@ -129,7 +138,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 		sources, width, ok := d.tick(ctx)
 
-		if ok && width != lastWidth {
+		switch {
+		case ok && width != lastWidth:
 			if writeErr := d.cfg.Sink.Write(width, sources); writeErr != nil {
 				_, _ = fmt.Fprintf(d.logger, "widthdaemon: write failed: %v\n", writeErr)
 			} else {
@@ -137,8 +147,20 @@ func (d *Daemon) Run(ctx context.Context) error {
 				lastChange = time.Now()
 				interval = d.cfg.ActiveInterval
 			}
-		} else if !lastChange.IsZero() && time.Since(lastChange) >= d.cfg.IdleAfter {
-			interval = d.cfg.IdleInterval
+		case ok:
+			// Width unchanged — refresh mtime so downstream staleness
+			// checks see the daemon is alive. Without this, a long-
+			// stable width causes the cache to be treated as dead.
+			if hbErr := d.cfg.Sink.Heartbeat(); hbErr != nil {
+				_, _ = fmt.Fprintf(d.logger, "widthdaemon: heartbeat failed: %v\n", hbErr)
+			}
+			if !lastChange.IsZero() && time.Since(lastChange) >= d.cfg.IdleAfter {
+				interval = d.cfg.IdleInterval
+			}
+		default:
+			// ok==false: no sources detected. Leave cache alone (epic
+			// anti-pattern: never write 0). No heartbeat either —
+			// there's nothing to keep alive.
 		}
 
 		timer.Reset(interval)

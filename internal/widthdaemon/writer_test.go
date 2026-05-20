@@ -1,6 +1,7 @@
 package widthdaemon
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestWriter_Write_HappyPath(t *testing.T) {
@@ -159,6 +161,57 @@ func TestWriter_Write_DefaultDir(t *testing.T) {
 	w := &Writer{}
 	if w.resolveDir() != defaultWriterDir {
 		t.Errorf("default dir = %q, want %q", w.resolveDir(), defaultWriterDir)
+	}
+}
+
+func TestWriter_Heartbeat_UpdatesMtimeWithoutRewritingContent(t *testing.T) {
+	dir := t.TempDir()
+	w := &Writer{Dir: dir}
+
+	// Write initial content.
+	if err := w.Write(80, []Source{{Kind: SourceKindTmux, TTY: "/dev/pts/3", Width: 80}}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	contentBefore, err := os.ReadFile(filepath.Join(dir, "parent-width"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	infoBefore, err := os.Stat(filepath.Join(dir, "parent-width"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	// Sleep briefly so mtime resolution can distinguish before/after.
+	time.Sleep(10 * time.Millisecond)
+	if hbErr := w.Heartbeat(); hbErr != nil {
+		t.Fatalf("Heartbeat: %v", hbErr)
+	}
+
+	contentAfter, err := os.ReadFile(filepath.Join(dir, "parent-width"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	infoAfter, err := os.Stat(filepath.Join(dir, "parent-width"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	if !bytes.Equal(contentBefore, contentAfter) {
+		t.Errorf("Heartbeat changed content: before=%q after=%q", contentBefore, contentAfter)
+	}
+	if !infoAfter.ModTime().After(infoBefore.ModTime()) {
+		t.Errorf("Heartbeat did not advance mtime: before=%v after=%v",
+			infoBefore.ModTime(), infoAfter.ModTime())
+	}
+}
+
+func TestWriter_Heartbeat_NoopWhenFilesAbsent(t *testing.T) {
+	// Heartbeat must not fail when the cache files haven't been
+	// created yet (daemon startup with no detection results yet).
+	dir := t.TempDir()
+	w := &Writer{Dir: dir}
+	if err := w.Heartbeat(); err != nil {
+		t.Errorf("Heartbeat on empty dir should be no-op, got: %v", err)
 	}
 }
 
