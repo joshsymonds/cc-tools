@@ -1,6 +1,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }: let
   cfg = config.services.cc-tools-width-daemon;
@@ -36,6 +37,17 @@ in {
       default = "/dev/shm/cc-tools";
       description = "Directory where parent-width and widths.json are atomically written.";
     };
+
+    tmuxPackage = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = pkgs.tmux;
+      description = ''
+        Package providing the `tmux` binary on the daemon's PATH. The
+        daemon forks `tmux list-clients` once per tick; without this on
+        PATH the tmux source is unavailable (utmp still works).
+        Set to null to omit tmux from PATH entirely.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -55,6 +67,11 @@ in {
           + " --writer-dir=${cfg.writerDir}";
         Restart = "always";
         RestartSec = "5s";
+
+        # The daemon forks `tmux list-clients`. systemd user services
+        # start with a minimal PATH, so tmux must be made explicit here
+        # or `tmux: executable file not found` floods the journal.
+        Environment = lib.optional (cfg.tmuxPackage != null) "PATH=${lib.makeBinPath [cfg.tmuxPackage]}";
 
         # Light hardening — the daemon doesn't need much. It reads
         # /var/run/utmp and forks tmux; that's it.
