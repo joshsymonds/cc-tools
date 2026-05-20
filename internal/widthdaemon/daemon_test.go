@@ -99,7 +99,7 @@ func TestDaemon_Run_SingleTickWrites(t *testing.T) {
 	utmp := &fakeDetector{results: [][]Source{nil}}
 	sink := &fakeSink{}
 
-	d := New(Config{
+	d := Build(Config{
 		ActiveInterval: 5 * time.Millisecond,
 		IdleInterval:   5 * time.Millisecond,
 		IdleAfter:      100 * time.Millisecond,
@@ -124,7 +124,7 @@ func TestDaemon_Run_StableWidthWritesOnce(t *testing.T) {
 	utmp := &fakeDetector{results: [][]Source{nil}}
 	sink := &fakeSink{}
 
-	d := New(Config{
+	d := Build(Config{
 		ActiveInterval: 5 * time.Millisecond,
 		IdleInterval:   5 * time.Millisecond,
 		IdleAfter:      100 * time.Millisecond,
@@ -149,7 +149,7 @@ func TestDaemon_Run_WidthChangeTriggersWrite(t *testing.T) {
 	utmp := &fakeDetector{results: [][]Source{nil}}
 	sink := &fakeSink{}
 
-	d := New(Config{
+	d := Build(Config{
 		ActiveInterval: 5 * time.Millisecond,
 		IdleInterval:   5 * time.Millisecond,
 		IdleAfter:      100 * time.Millisecond,
@@ -172,7 +172,7 @@ func TestDaemon_Run_AllSourcesEmptyNoWrite(t *testing.T) {
 	utmp := &fakeDetector{results: [][]Source{nil}}
 	sink := &fakeSink{}
 
-	d := New(Config{
+	d := Build(Config{
 		ActiveInterval: 5 * time.Millisecond,
 		IdleInterval:   5 * time.Millisecond,
 		IdleAfter:      100 * time.Millisecond,
@@ -194,7 +194,7 @@ func TestDaemon_Run_DetectorErrorContinues(t *testing.T) {
 	}}
 	sink := &fakeSink{}
 
-	d := New(Config{
+	d := Build(Config{
 		ActiveInterval: 5 * time.Millisecond,
 		IdleInterval:   5 * time.Millisecond,
 		IdleAfter:      100 * time.Millisecond,
@@ -216,7 +216,7 @@ func TestDaemon_Run_ContextCancelReturnsPromptly(t *testing.T) {
 	utmp := &fakeDetector{results: [][]Source{nil}}
 	sink := &fakeSink{}
 
-	d := New(Config{
+	d := Build(Config{
 		ActiveInterval: 50 * time.Millisecond,
 		IdleInterval:   50 * time.Millisecond,
 		IdleAfter:      100 * time.Millisecond,
@@ -242,7 +242,7 @@ func TestDaemon_Run_ContextCancelReturnsPromptly(t *testing.T) {
 }
 
 func TestDaemon_Run_DefaultsApplied(t *testing.T) {
-	d := New(Config{Sink: &fakeSink{}, Tmux: &fakeDetector{}, Utmp: &fakeDetector{}})
+	d := Build(Config{Sink: &fakeSink{}, Tmux: &fakeDetector{}, Utmp: &fakeDetector{}})
 	if d.cfg.ActiveInterval != defaultActiveInterval {
 		t.Errorf("default ActiveInterval = %v, want %v", d.cfg.ActiveInterval, defaultActiveInterval)
 	}

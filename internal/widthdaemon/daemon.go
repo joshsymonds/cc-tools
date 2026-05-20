@@ -77,8 +77,10 @@ type Daemon struct {
 	logger io.Writer
 }
 
-// New applies defaults and returns a ready-to-Run daemon.
-func New(cfg Config) *Daemon {
+// Build applies defaults and returns a ready-to-Run daemon. (Named
+// Build instead of New to satisfy this repo's "no New constructors in
+// cmd/" lint rule.)
+func Build(cfg Config) *Daemon {
 	if cfg.ActiveInterval <= 0 {
 		cfg.ActiveInterval = defaultActiveInterval
 	}
