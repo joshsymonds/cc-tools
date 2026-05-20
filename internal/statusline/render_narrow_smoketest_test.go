@@ -1,6 +1,10 @@
 package statusline
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/mattn/go-runewidth"
+)
 
 // TestSmoke_ExactWidthsAcrossThresholds verifies the renderer
 // produces the expected visible-cell count at multiple widths
@@ -25,16 +29,13 @@ func TestSmoke_ExactWidthsAcrossThresholds(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := renderAt(t, c.width)
-		w := narrowVisibleWidth(got)
+		w := runewidth.StringWidth(stripAnsi(got))
 		wantNarrow := c.width - defaultSpacerTotal
 		switch {
 		case c.isNarrow && w != wantNarrow:
 			t.Errorf("width=%d narrow expected exact %d cells (termWidth − spacers), got %d",
 				c.width, wantNarrow, w)
 		case !c.isNarrow:
-			// Wide layout's exact width isn't tested here; just
-			// check it's positive. Wide renders to effectiveWidth =
-			// termWidth − spacers same as narrow.
 			if w <= 0 {
 				t.Errorf("width=%d wide expected positive width, got %d", c.width, w)
 			}

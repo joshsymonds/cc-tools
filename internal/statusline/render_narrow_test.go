@@ -1,19 +1,24 @@
 package statusline
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/mattn/go-runewidth"
 )
 
-// mapEnvReader is a tiny EnvReader stub. The package's other tests
-// already have their own env stubs; this one is local to keep the
-// narrow-mode tests self-contained.
-type narrowMapEnvReader map[string]string
-
-func (m narrowMapEnvReader) Get(key string) string { return m[key] }
-
-func depsWith(env map[string]string) *Dependencies {
+// depsFor builds a Dependencies suitable for narrow-mode unit tests.
+// Reuses the package's canonical MockEnvReader so the env reader
+// stays consistent with the rest of the test suite.
+func depsFor(t *testing.T, awsProfile string) *Dependencies {
+	t.Helper()
+	env := NewMockEnvReader()
+	if awsProfile != "" {
+		env.vars["AWS_PROFILE"] = awsProfile
+	}
 	return &Dependencies{
-		EnvReader: narrowMapEnvReader(env),
+		EnvReader: env,
+		Resolver:  newTestResolver(t, ""),
 	}
 }
 
@@ -45,84 +50,130 @@ func TestContextColor_Thresholds(t *testing.T) {
 	}
 }
 
+func TestBuildNarrowContextBody_QuintileCounts(t *testing.T) {
+	// Round-half-up: 0-9 → 0 filled, 10-29 → 1, 30-49 → 2, 50-69 → 3, 70-89 → 4, 90+ → 5.
+	cases := []struct {
+		pct          int
+		wantFilled   int
+		wantContains string
+	}{
+		{0, 0, " 0%"},
+		{15, 1, " 15%"},
+		{42, 2, " 42%"},
+		{60, 3, " 60%"},
+		{75, 4, " 75%"},
+		{100, 5, " 100%"},
+	}
+	for _, c := range cases {
+		got := buildNarrowContextBody(c.pct)
+		filled := strings.Count(got, "▰")
+		empty := strings.Count(got, "▱")
+		if filled != c.wantFilled {
+			t.Errorf(
+				"buildNarrowContextBody(%d): filled=%d, want %d (body=%q)",
+				c.pct,
+				filled,
+				c.wantFilled,
+				got,
+			)
+		}
+		if filled+empty != narrowContextMaxQuintiles {
+			t.Errorf(
+				"buildNarrowContextBody(%d): filled+empty = %d, want %d",
+				c.pct,
+				filled+empty,
+				narrowContextMaxQuintiles,
+			)
+		}
+		if !strings.Contains(got, c.wantContains) {
+			t.Errorf(
+				"buildNarrowContextBody(%d) = %q, want to contain %q",
+				c.pct,
+				got,
+				c.wantContains,
+			)
+		}
+		if strings.Contains(got, ".") {
+			t.Errorf("buildNarrowContextBody(%d) contains decimal: %q", c.pct, got)
+		}
+	}
+}
+
+func TestStripNarrowControl_RemovesEscapes(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"hello", "hello"},
+		{"main\x1b[31m", "main[31m"}, // ESC stripped; the [31m remains as plain printable text
+		{"foo\x00bar", "foobar"},
+		{"x\x07y", "xy"},
+		{"normal name", "normal name"}, // SP kept (≥ 0x20)
+		{"tab\there", "tabhere"},
+		{"del\x7fchar", "delchar"},
+	}
+	for _, c := range cases {
+		got := stripNarrowControl(c.in)
+		if got != c.want {
+			t.Errorf("stripNarrowControl(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestGatherNarrowChips_DirOnly(t *testing.T) {
 	t.Setenv("HOME", "/tmp/fakehome")
-	deps := depsWith(map[string]string{})
-	data := &CachedData{
-		CurrentDir:     "/tmp/fakehome/x",
-		UsedPercentage: 0,
-	}
+	deps := depsFor(t, "")
+	data := &CachedData{CurrentDir: "/tmp/fakehome/x"}
 	chips := gatherNarrowChips(deps, data)
 	if len(chips) != 2 {
 		t.Fatalf("want 2 chips (dir+ctx) when no git/env, got %d: %+v", len(chips), chips)
 	}
-	if chips[0].Kind != "dir" {
-		t.Errorf("chip[0].Kind = %q, want dir", chips[0].Kind)
+	if chips[0].Kind != kindDir {
+		t.Errorf("chip[0].Kind = %q, want %q", chips[0].Kind, kindDir)
 	}
-	if chips[1].Kind != "context" {
-		t.Errorf("chip[1].Kind = %q, want context", chips[1].Kind)
+	if chips[1].Kind != kindContext {
+		t.Errorf("chip[1].Kind = %q, want %q", chips[1].Kind, kindContext)
 	}
 }
 
 func TestGatherNarrowChips_WithGit(t *testing.T) {
-	deps := depsWith(map[string]string{})
-	data := &CachedData{
-		CurrentDir:     "/tmp/x",
-		GitBranch:      "main",
-		UsedPercentage: 25,
-	}
+	deps := depsFor(t, "")
+	data := &CachedData{CurrentDir: "/tmp/x", GitBranch: "main", UsedPercentage: 25}
 	chips := gatherNarrowChips(deps, data)
 	if len(chips) != 3 {
 		t.Fatalf("want 3 chips (dir+ctx+branch), got %d: %+v", len(chips), chips)
 	}
-	if chips[2].Kind != "branch" {
-		t.Errorf("chip[2].Kind = %q, want branch", chips[2].Kind)
+	if chips[2].Kind != kindBranch {
+		t.Errorf("chip[2].Kind = %q, want %q", chips[2].Kind, kindBranch)
 	}
-	// Body should include branch name (with icon).
-	if !contains(chips[2].Body, "main") {
+	if !strings.Contains(chips[2].Body, "main") {
 		t.Errorf("branch chip body should contain 'main', got %q", chips[2].Body)
 	}
 }
 
 func TestGatherNarrowChips_WithAWS(t *testing.T) {
-	// AWS-only, no git, no other env. Resolver-less deps requires the
-	// chip rendering to work without a Resolver; the existing
-	// createAwsComponent uses deps.Resolver, so for the narrow path
-	// we'd need either a resolver OR a graceful fallback. Provide a
-	// real resolver.
-	deps := &Dependencies{
-		EnvReader: narrowMapEnvReader{"AWS_PROFILE": "staging"},
-		Resolver:  newTestResolver(t, ""),
-	}
-	data := &CachedData{
-		CurrentDir:     "/tmp/x",
-		UsedPercentage: 30,
-	}
+	deps := depsFor(t, "staging")
+	data := &CachedData{CurrentDir: "/tmp/x", UsedPercentage: 30}
 	chips := gatherNarrowChips(deps, data)
 	if len(chips) != 3 {
 		t.Fatalf("want 3 chips (dir+ctx+env), got %d: %+v", len(chips), chips)
 	}
-	if chips[2].Kind != "env" {
-		t.Errorf("chip[2].Kind = %q, want env", chips[2].Kind)
+	if chips[2].Kind != kindEnv {
+		t.Errorf("chip[2].Kind = %q, want %q", chips[2].Kind, kindEnv)
+	}
+	if !strings.Contains(chips[2].Body, "staging") {
+		t.Errorf("AWS env chip body should contain profile 'staging', got %q", chips[2].Body)
 	}
 }
 
 func TestGatherNarrowChips_AllChips(t *testing.T) {
-	deps := &Dependencies{
-		EnvReader: narrowMapEnvReader{"AWS_PROFILE": "staging"},
-		Resolver:  newTestResolver(t, ""),
-	}
-	data := &CachedData{
-		CurrentDir:     "/tmp/x",
-		GitBranch:      "main",
-		UsedPercentage: 25,
-	}
+	deps := depsFor(t, "staging")
+	data := &CachedData{CurrentDir: "/tmp/x", GitBranch: "main", UsedPercentage: 25}
 	chips := gatherNarrowChips(deps, data)
 	if len(chips) != 4 {
 		t.Fatalf("want 4 chips (dir+ctx+branch+env), got %d: %+v", len(chips), chips)
 	}
 	kinds := []string{chips[0].Kind, chips[1].Kind, chips[2].Kind, chips[3].Kind}
-	want := []string{"dir", "context", "branch", "env"}
+	want := []string{kindDir, kindContext, kindBranch, kindEnv}
 	for i, k := range want {
 		if kinds[i] != k {
 			t.Errorf("chip[%d].Kind = %q, want %q", i, kinds[i], k)
@@ -131,249 +182,238 @@ func TestGatherNarrowChips_AllChips(t *testing.T) {
 }
 
 func TestGatherNarrowChips_AWSPrioritizedOverGcloud(t *testing.T) {
-	// Both AWS and gcloud env set → AWS wins, only one env chip.
-	deps := &Dependencies{
-		EnvReader: narrowMapEnvReader{"AWS_PROFILE": "staging"},
-		Resolver:  newTestResolver(t, ""),
-	}
-	data := &CachedData{
-		CurrentDir:    "/tmp/x",
-		GcloudProject: "my-project",
-	}
+	deps := depsFor(t, "staging")
+	data := &CachedData{CurrentDir: "/tmp/x", GcloudProject: "my-project"}
 	chips := gatherNarrowChips(deps, data)
 	if len(chips) != 3 {
 		t.Fatalf("want 3 chips (dir+ctx+aws), got %d: %+v", len(chips), chips)
 	}
-	// The env chip body should contain the AWS profile, not the gcloud project.
 	envBody := chips[2].Body
-	if !contains(envBody, "staging") {
+	if !strings.Contains(envBody, "staging") {
 		t.Errorf("env chip should be AWS (staging), got body %q", envBody)
 	}
-	if contains(envBody, "my-project") {
+	if strings.Contains(envBody, "my-project") {
 		t.Errorf("env chip should NOT include gcloud project; got %q", envBody)
 	}
 }
 
 func TestGatherNarrowChips_GcloudWhenNoAWS(t *testing.T) {
-	deps := &Dependencies{
-		EnvReader: narrowMapEnvReader{},
-		Resolver:  newTestResolver(t, ""),
-	}
-	data := &CachedData{
-		CurrentDir:    "/tmp/x",
-		GcloudProject: "my-project",
-	}
+	deps := depsFor(t, "")
+	data := &CachedData{CurrentDir: "/tmp/x", GcloudProject: "my-project"}
 	chips := gatherNarrowChips(deps, data)
 	if len(chips) != 3 {
 		t.Fatalf("want 3 chips (dir+ctx+gcloud), got %d: %+v", len(chips), chips)
 	}
-	if !contains(chips[2].Body, "my-project") {
+	if !strings.Contains(chips[2].Body, "my-project") {
 		t.Errorf("env chip should contain gcloud project, got %q", chips[2].Body)
 	}
 }
 
 func TestGatherNarrowChips_K8sWhenNoAWSorGcloud(t *testing.T) {
-	deps := &Dependencies{
-		EnvReader: narrowMapEnvReader{},
-		Resolver:  newTestResolver(t, ""),
-	}
-	data := &CachedData{
-		CurrentDir: "/tmp/x",
-		K8sContext: "my-cluster",
-	}
+	deps := depsFor(t, "")
+	data := &CachedData{CurrentDir: "/tmp/x", K8sContext: "my-cluster"}
 	chips := gatherNarrowChips(deps, data)
 	if len(chips) != 3 {
 		t.Fatalf("want 3 chips (dir+ctx+k8s), got %d: %+v", len(chips), chips)
 	}
-	if !contains(chips[2].Body, "my-cluster") {
+	if !strings.Contains(chips[2].Body, "my-cluster") {
 		t.Errorf("env chip should contain k8s context, got %q", chips[2].Body)
 	}
 }
 
-func TestGatherNarrowChips_ContextPercentRounded(t *testing.T) {
-	// UsedPercentage is float64. Verify it's integer-truncated cleanly
-	// so chip body never contains decimals.
-	deps := depsWith(map[string]string{})
-	data := &CachedData{
-		CurrentDir:     "/tmp/x",
-		UsedPercentage: 42.7,
-	}
+func TestGatherNarrowChips_ContextPercentTruncates(t *testing.T) {
+	deps := depsFor(t, "")
+	data := &CachedData{CurrentDir: "/tmp/x", UsedPercentage: 42.7}
 	chips := gatherNarrowChips(deps, data)
-	if len(chips) < 2 || chips[1].Kind != "context" {
+	if len(chips) < 2 || chips[1].Kind != kindContext {
 		t.Fatalf("expected context chip at index 1, got %+v", chips)
 	}
-	// 42.7 should render as "42%" or "43%" — either rounding behavior
-	// is acceptable but it must NOT contain a decimal point.
-	if contains(chips[1].Body, ".") {
-		t.Errorf("context body should not contain '.', got %q", chips[1].Body)
+	if !strings.Contains(chips[1].Body, "42%") {
+		t.Errorf("context body should contain '42%%' (int truncation), got %q", chips[1].Body)
+	}
+	if strings.Contains(chips[1].Body, "43%") {
+		t.Errorf("context body should NOT contain '43%%' (no half-up), got %q", chips[1].Body)
+	}
+	if strings.Contains(chips[1].Body, ".") {
+		t.Errorf("context body should not contain decimal, got %q", chips[1].Body)
 	}
 }
 
-// --- composition tests ---
+// --- Security regression tests for ANSI injection (S1) ---
+
+func TestGatherNarrowChips_StripsControlBytesFromBranch(t *testing.T) {
+	// A poisoned .git/HEAD value like `main\x1b]0;PWN\x07` should
+	// either be rejected by validNarrowBranchName or have its
+	// control bytes stripped before reaching the chip body.
+	deps := depsFor(t, "")
+	data := &CachedData{
+		CurrentDir: "/tmp/x",
+		GitBranch:  "main\x1b]0;PWN\x07",
+	}
+	chips := gatherNarrowChips(deps, data)
+	for _, c := range chips {
+		for _, r := range c.Body {
+			if r < 0x20 || r == 0x7f {
+				t.Errorf("chip body %q contains control byte 0x%x — sanitization failed", c.Body, r)
+			}
+		}
+	}
+}
+
+func TestGatherNarrowChips_StripsControlBytesFromAWSProfile(t *testing.T) {
+	deps := depsFor(t, "prof\x1b]0;x\x07")
+	data := &CachedData{CurrentDir: "/tmp/x"}
+	chips := gatherNarrowChips(deps, data)
+	for _, c := range chips {
+		for _, r := range c.Body {
+			if r < 0x20 || r == 0x7f {
+				t.Errorf("chip body %q contains control byte 0x%x — sanitization failed", c.Body, r)
+			}
+		}
+	}
+}
+
+func TestGatherNarrowChips_StripsControlBytesFromGcloud(t *testing.T) {
+	deps := depsFor(t, "")
+	data := &CachedData{CurrentDir: "/tmp/x", GcloudProject: "proj\x1bevil"}
+	chips := gatherNarrowChips(deps, data)
+	for _, c := range chips {
+		if strings.ContainsRune(c.Body, '\x1b') {
+			t.Errorf("chip body still contains ESC after stripping: %q", c.Body)
+		}
+	}
+}
+
+func TestGatherNarrowChips_RejectsInvalidBranchName(t *testing.T) {
+	deps := depsFor(t, "")
+	data := &CachedData{CurrentDir: "/tmp/x", GitBranch: "  spaces-start"}
+	chips := gatherNarrowChips(deps, data)
+	for _, c := range chips {
+		if c.Kind == kindBranch {
+			t.Errorf("branch chip should be rejected for invalid name, got %+v", c)
+		}
+	}
+}
+
+// --- Composition tests ---
 
 func TestComposeNarrowChain_Empty(t *testing.T) {
 	s := newTestStatusline(t, newTestResolver(t, ""))
-	got := s.composeNarrowChain(nil)
-	if got != "" {
+	if got := s.composeNarrowChain(nil); got != "" {
 		t.Errorf("empty chain = %q, want ''", got)
 	}
-	got = s.composeNarrowChain([]narrowChip{})
-	if got != "" {
+	if got := s.composeNarrowChain([]narrowChip{}); got != "" {
 		t.Errorf("empty slice chain = %q, want ''", got)
 	}
 }
 
 func TestComposeNarrowChain_DirOnly(t *testing.T) {
 	s := newTestStatusline(t, newTestResolver(t, ""))
-	chips := []narrowChip{{Color: "lavender", Body: "~/x", Kind: "dir"}}
+	chips := []narrowChip{{Color: "lavender", Body: "~/x", Kind: kindDir}}
 	got := s.composeNarrowChain(chips)
-	if !contains(got, LeftCurve) {
+	if !strings.Contains(got, LeftCurve) {
 		t.Errorf("missing LeftCurve in %q", got)
 	}
-	if !contains(got, RightCurve) {
+	if !strings.Contains(got, RightCurve) {
 		t.Errorf("missing RightCurve in %q", got)
 	}
-	if contains(got, LeftChevron) || contains(got, RightChevron) {
+	if strings.Contains(got, LeftChevron) || strings.Contains(got, RightChevron) {
 		t.Errorf("single chip should have NO chevrons, got %q", got)
 	}
 }
 
 func TestComposeNarrowChain_DirAndContext_AllForwardChevrons(t *testing.T) {
-	// dir + context, context is the last chip → no pivot, all
-	// chevrons are forward (LeftChevron).
 	s := newTestStatusline(t, newTestResolver(t, ""))
 	chips := []narrowChip{
-		{Color: "lavender", Body: "~/x", Kind: "dir"},
-		{Color: "green", Body: "0%", Kind: "context"},
+		{Color: "lavender", Body: "~/x", Kind: kindDir},
+		{Color: "green", Body: "0%", Kind: kindContext},
 	}
 	got := s.composeNarrowChain(chips)
-	forwardCount := stringsCount(got, LeftChevron)
-	backwardCount := stringsCount(got, RightChevron)
-	if forwardCount != 1 {
-		t.Errorf("want 1 forward chevron, got %d in %q", forwardCount, got)
+	if strings.Count(got, LeftChevron) != 1 {
+		t.Errorf("want 1 forward chevron, got %d in %q", strings.Count(got, LeftChevron), got)
 	}
-	if backwardCount != 0 {
-		t.Errorf("want 0 backward chevrons (context is last, no pivot), got %d", backwardCount)
+	if strings.Count(got, RightChevron) != 0 {
+		t.Errorf("want 0 backward chevrons (context is last, no pivot), got %d",
+			strings.Count(got, RightChevron))
 	}
 }
 
 func TestComposeNarrowChain_DirContextBranch_PivotAtBranch(t *testing.T) {
-	// dir + ctx + branch. Pivot is at branch (the chip right after
-	// context). So chevron between ctx and branch is backward.
-	// Chevron between dir and ctx is forward.
 	s := newTestStatusline(t, newTestResolver(t, ""))
 	chips := []narrowChip{
-		{Color: "lavender", Body: "~/x", Kind: "dir"},
-		{Color: "green", Body: "0%", Kind: "context"},
-		{Color: "pink", Body: " main", Kind: "branch"},
+		{Color: "lavender", Body: "~/x", Kind: kindDir},
+		{Color: "green", Body: "0%", Kind: kindContext},
+		{Color: "pink", Body: " main", Kind: kindBranch},
 	}
 	got := s.composeNarrowChain(chips)
-	if stringsCount(got, LeftChevron) != 1 {
-		t.Errorf("want exactly 1 forward chevron, got %d in %q", stringsCount(got, LeftChevron), got)
+	if strings.Count(got, LeftChevron) != 1 {
+		t.Errorf("want exactly 1 forward chevron, got %d", strings.Count(got, LeftChevron))
 	}
-	if stringsCount(got, RightChevron) != 1 {
-		t.Errorf("want exactly 1 backward chevron, got %d in %q", stringsCount(got, RightChevron), got)
+	if strings.Count(got, RightChevron) != 1 {
+		t.Errorf("want exactly 1 backward chevron, got %d", strings.Count(got, RightChevron))
 	}
 }
 
 func TestComposeNarrowChain_AllFourChips_MirrorPattern(t *testing.T) {
-	// dir + ctx + branch + env. Forward between dir/ctx; backward
-	// between ctx/branch AND branch/env.
 	s := newTestStatusline(t, newTestResolver(t, ""))
 	chips := []narrowChip{
-		{Color: "lavender", Body: "~/x", Kind: "dir"},
-		{Color: "green", Body: "0%", Kind: "context"},
-		{Color: "pink", Body: " main", Kind: "branch"},
-		{Color: "peach", Body: " staging", Kind: "env"},
+		{Color: "lavender", Body: "~/x", Kind: kindDir},
+		{Color: "green", Body: "0%", Kind: kindContext},
+		{Color: "pink", Body: " main", Kind: kindBranch},
+		{Color: "peach", Body: " staging", Kind: kindEnv},
 	}
 	got := s.composeNarrowChain(chips)
-	if stringsCount(got, LeftChevron) != 1 {
-		t.Errorf("want 1 forward chevron, got %d", stringsCount(got, LeftChevron))
+	if strings.Count(got, LeftChevron) != 1 {
+		t.Errorf("want 1 forward chevron, got %d", strings.Count(got, LeftChevron))
 	}
-	if stringsCount(got, RightChevron) != 2 {
-		t.Errorf("want 2 backward chevrons, got %d", stringsCount(got, RightChevron))
+	if strings.Count(got, RightChevron) != 2 {
+		t.Errorf("want 2 backward chevrons, got %d", strings.Count(got, RightChevron))
 	}
 }
 
-func TestComposeNarrowChain_StartsWithLeftCurve(t *testing.T) {
+func TestComposeNarrowChain_StartsWithLeftCurveEndsWithRightCurve(t *testing.T) {
 	s := newTestStatusline(t, newTestResolver(t, ""))
 	chips := []narrowChip{
-		{Color: "lavender", Body: "~/x", Kind: "dir"},
-		{Color: "green", Body: "0%", Kind: "context"},
+		{Color: "lavender", Body: "~/x", Kind: kindDir},
+		{Color: "green", Body: "0%", Kind: kindContext},
 	}
 	got := s.composeNarrowChain(chips)
 	stripped := stripAnsi(got)
-	if stripped == "" || !startsWith(stripped, LeftCurve) {
+	if !strings.HasPrefix(stripped, LeftCurve) {
 		t.Errorf("stripped output should start with LeftCurve, got %q", stripped)
 	}
-}
-
-func TestComposeNarrowChain_EndsWithRightCurveThenReset(t *testing.T) {
-	s := newTestStatusline(t, newTestResolver(t, ""))
-	chips := []narrowChip{
-		{Color: "lavender", Body: "~/x", Kind: "dir"},
-		{Color: "green", Body: "0%", Kind: "context"},
+	if !strings.HasSuffix(stripped, RightCurve) {
+		t.Errorf("stripped output should end with RightCurve, got %q", stripped)
 	}
-	got := s.composeNarrowChain(chips)
-	// Output must end with NC (\033[0m). Strip ANSI and confirm
-	// the last visible character is RightCurve.
-	if !endsWith(got, "\033[0m") {
-		t.Errorf("output should end with NC reset, got tail %q",
-			tail(got, 8))
-	}
-	stripped := stripAnsi(got)
-	if !endsWith(stripped, RightCurve) {
-		t.Errorf("stripped output should end with RightCurve, got %q",
-			tail(stripped, 4))
+	if !strings.HasSuffix(got, "\033[0m") {
+		const tailN = 8
+		start := max(0, len(got)-tailN)
+		t.Errorf("output should end with NC reset, tail = %q", got[start:])
 	}
 }
 
-func TestNarrowVisibleWidth_MatchesWideConvention(t *testing.T) {
-	// narrowVisibleWidth should equal runewidth.StringWidth(stripAnsi(s))
-	// — same primitive the wide layout uses.
-	cases := []string{
-		"",
-		"hello",
-		"\033[38;2;1;2;3mhello\033[0m",
-		LeftCurve + " text " + RightCurve,
-	}
-	for _, c := range cases {
-		got := narrowVisibleWidth(c)
-		// Sanity: must be at least the rune count of the stripped
-		// string (single-cell chars).
-		stripped := stripAnsi(c)
-		if got < 0 {
-			t.Errorf("negative width %d for %q", got, c)
-		}
-		if got > 0 && stripped == "" {
-			t.Errorf("non-zero width %d for empty-after-strip %q", got, c)
-		}
-	}
-}
-
-// --- width fitting + render tests ---
+// --- Fit + render tests ---
 
 func TestFitNarrowChain_AllFitWithSlack(t *testing.T) {
 	chips := []narrowChip{
-		{Color: "lavender", Body: "~/x", Kind: "dir"},
-		{Color: "green", Body: "0%", Kind: "context"},
-		{Color: "pink", Body: " main", Kind: "branch"},
+		{Color: "lavender", Body: "~/x", Kind: kindDir},
+		{Color: "green", Body: "0%", Kind: kindContext},
+		{Color: "pink", Body: " main", Kind: kindBranch},
 	}
 	got := fitNarrowChain(chips, 50)
 	if len(got) != 3 {
 		t.Fatalf("want 3 chips kept, got %d", len(got))
 	}
-	// Context chip should have expanded — its body wider than "0%".
 	ctxIdx := -1
 	for i, c := range got {
-		if c.Kind == "context" {
+		if c.Kind == kindContext {
 			ctxIdx = i
 		}
 	}
 	if ctxIdx == -1 {
 		t.Fatal("context chip missing")
 	}
-	if !contains(got[ctxIdx].Body, "0%") {
+	if !strings.Contains(got[ctxIdx].Body, "0%") {
 		t.Errorf("context body should still contain '0%%', got %q", got[ctxIdx].Body)
 	}
 	if got[ctxIdx].Body == "0%" {
@@ -382,52 +422,51 @@ func TestFitNarrowChain_AllFitWithSlack(t *testing.T) {
 }
 
 func TestFitNarrowChain_DropEnvFirst(t *testing.T) {
-	// Very long env chip — should drop first under pressure.
 	chips := []narrowChip{
-		{Color: "lavender", Body: "~/proj", Kind: "dir"},
-		{Color: "green", Body: "0%", Kind: "context"},
-		{Color: "pink", Body: " main", Kind: "branch"},
-		{Color: "peach", Body: " a-really-long-aws-profile-name", Kind: "env"},
+		{Color: "lavender", Body: "~/proj", Kind: kindDir},
+		{Color: "green", Body: "0%", Kind: kindContext},
+		{Color: "pink", Body: " main", Kind: kindBranch},
+		{Color: "peach", Body: " a-really-long-aws-profile-name", Kind: kindEnv},
 	}
 	got := fitNarrowChain(chips, 30)
 	hasEnv := false
 	hasBranch := false
 	for _, c := range got {
-		if c.Kind == "env" {
+		if c.Kind == kindEnv {
 			hasEnv = true
 		}
-		if c.Kind == "branch" {
+		if c.Kind == kindBranch {
 			hasBranch = true
 		}
 	}
 	if hasEnv {
-		t.Errorf("env should be dropped first at budget=30, got chips: %+v", got)
+		t.Errorf("env should drop first at budget=30, got chips: %+v", got)
 	}
 	if !hasBranch {
-		t.Errorf("branch should survive (env drops first); got: %+v", got)
+		t.Errorf("branch should survive; got: %+v", got)
 	}
 }
 
 func TestFitNarrowChain_DropBranchSecond(t *testing.T) {
 	chips := []narrowChip{
-		{Color: "lavender", Body: "~/proj", Kind: "dir"},
-		{Color: "green", Body: "0%", Kind: "context"},
-		{Color: "pink", Body: " feature/very-long-branch-name", Kind: "branch"},
-		{Color: "peach", Body: " prod", Kind: "env"},
+		{Color: "lavender", Body: "~/proj", Kind: kindDir},
+		{Color: "green", Body: "0%", Kind: kindContext},
+		{Color: "pink", Body: " feature/very-long-branch-name", Kind: kindBranch},
+		{Color: "peach", Body: " prod", Kind: kindEnv},
 	}
 	got := fitNarrowChain(chips, 25)
 	hasBranch := false
 	hasEnv := false
 	for _, c := range got {
-		if c.Kind == "branch" {
+		if c.Kind == kindBranch {
 			hasBranch = true
 		}
-		if c.Kind == "env" {
+		if c.Kind == kindEnv {
 			hasEnv = true
 		}
 	}
 	if hasEnv {
-		t.Errorf("env should drop before branch at budget=25, got chips: %+v", got)
+		t.Errorf("env should drop before branch at budget=25, got: %+v", got)
 	}
 	if hasBranch {
 		t.Errorf("branch should ALSO drop at budget=25; got: %+v", got)
@@ -435,48 +474,44 @@ func TestFitNarrowChain_DropBranchSecond(t *testing.T) {
 }
 
 func TestFitNarrowChain_TruncateDirToLeaf(t *testing.T) {
-	// Dir is long; only dir+context with both env+branch dropped
-	// still doesn't fit until dir is truncated to its leaf.
 	chips := []narrowChip{
-		{Color: "lavender", Body: "~/Personal/cc-tools/long/path/segment", Kind: "dir"},
-		{Color: "green", Body: "0%", Kind: "context"},
+		{Color: "lavender", Body: "~/Personal/cc-tools/long/path/segment", Kind: kindDir},
+		{Color: "green", Body: "0%", Kind: kindContext},
 	}
 	got := fitNarrowChain(chips, 18)
 	if len(got) < 1 {
 		t.Fatalf("want at least dir chip, got nothing")
 	}
-	// Dir body should be just the leaf "segment".
-	if got[0].Kind != "dir" {
+	if got[0].Kind != kindDir {
 		t.Fatalf("chips[0] should be dir, got %+v", got[0])
 	}
-	if contains(got[0].Body, "/") {
+	if strings.Contains(got[0].Body, "/") {
 		t.Errorf("dir body should be leaf-only (no slash), got %q", got[0].Body)
 	}
-	if !contains(got[0].Body, "segment") {
+	if !strings.Contains(got[0].Body, "segment") {
 		t.Errorf("dir body should contain leaf 'segment', got %q", got[0].Body)
 	}
 }
 
 func TestFitNarrowChain_DirAlwaysSurvives(t *testing.T) {
 	chips := []narrowChip{
-		{Color: "lavender", Body: "~/proj", Kind: "dir"},
-		{Color: "green", Body: "0%", Kind: "context"},
-		{Color: "pink", Body: " main", Kind: "branch"},
-		{Color: "peach", Body: " prod", Kind: "env"},
+		{Color: "lavender", Body: "~/proj", Kind: kindDir},
+		{Color: "green", Body: "0%", Kind: kindContext},
+		{Color: "pink", Body: " main", Kind: kindBranch},
+		{Color: "peach", Body: " prod", Kind: kindEnv},
 	}
-	got := fitNarrowChain(chips, 10) // extreme tight
+	got := fitNarrowChain(chips, 10)
 	if len(got) == 0 {
 		t.Fatalf("dir must always survive; got empty slice")
 	}
-	if got[0].Kind != "dir" {
+	if got[0].Kind != kindDir {
 		t.Errorf("first surviving chip must be dir; got %+v", got[0])
 	}
 }
 
 func TestPadContextBody_EvenSlack(t *testing.T) {
 	got := padContextBody("42%", 11)
-	// width("42%") = 3, slack = 8, left = 4, right = 4.
-	want := "    42%    "
+	want := "    42%    " // slack=8, left=4, right=4
 	if got != want {
 		t.Errorf("padContextBody(42%%, 11) = %q, want %q", got, want)
 	}
@@ -484,8 +519,7 @@ func TestPadContextBody_EvenSlack(t *testing.T) {
 
 func TestPadContextBody_OddSlack(t *testing.T) {
 	got := padContextBody("42%", 10)
-	// width = 3, slack = 7, left = 3, right = 4 (extra goes right).
-	want := "   42%    "
+	want := "   42%    " // slack=7, left=3, right=4
 	if got != want {
 		t.Errorf("padContextBody(42%%, 10) = %q, want %q", got, want)
 	}
@@ -498,70 +532,7 @@ func TestPadContextBody_BodyTooBig(t *testing.T) {
 	}
 }
 
-func TestRenderNarrow_Width50_AllChips(t *testing.T) {
-	s := newTestStatusline(t, newTestResolver(t, ""))
-	data := &CachedData{
-		CurrentDir:     "/tmp/x",
-		UsedPercentage: 25,
-		GitBranch:      "main",
-	}
-	// AWS env via the mock env reader.
-	if er, ok := s.deps.EnvReader.(*MockEnvReader); ok {
-		er.vars["AWS_PROFILE"] = "staging"
-	}
-	got := s.renderNarrow(data, 50)
-	w := narrowVisibleWidth(got)
-	if w != 50 {
-		t.Errorf("renderNarrow(50) visible width = %d, want 50; output=%q", w, stripAnsi(got))
-	}
-	if !contains(stripAnsi(got), LeftCurve) {
-		t.Errorf("output missing LeftCurve")
-	}
-	if !contains(stripAnsi(got), RightCurve) {
-		t.Errorf("output missing RightCurve")
-	}
-}
-
-func TestRenderNarrow_Width80_AllChips(t *testing.T) {
-	s := newTestStatusline(t, newTestResolver(t, ""))
-	data := &CachedData{
-		CurrentDir:     "/tmp/x",
-		UsedPercentage: 50,
-		GitBranch:      "main",
-	}
-	got := s.renderNarrow(data, 80)
-	if w := narrowVisibleWidth(got); w != 80 {
-		t.Errorf("renderNarrow(80) visible width = %d, want 80", w)
-	}
-}
-
-func TestRenderNarrow_Width30_DirAndContextOnly(t *testing.T) {
-	s := newTestStatusline(t, newTestResolver(t, ""))
-	data := &CachedData{
-		CurrentDir:     "/tmp/x",
-		UsedPercentage: 50,
-		GitBranch:      "feature/very-long-branch-name",
-	}
-	got := s.renderNarrow(data, 30)
-	if w := narrowVisibleWidth(got); w != 30 {
-		t.Errorf("renderNarrow(30) visible width = %d, want 30; output=%q", w, stripAnsi(got))
-	}
-}
-
-func TestRenderNarrow_Width15_DirOnly(t *testing.T) {
-	s := newTestStatusline(t, newTestResolver(t, ""))
-	data := &CachedData{
-		CurrentDir:     "/home/user/projects/very-long-name",
-		UsedPercentage: 50,
-	}
-	got := s.renderNarrow(data, 15)
-	if w := narrowVisibleWidth(got); w != 15 {
-		t.Errorf("renderNarrow(15) visible width = %d, want 15; output=%q", w, stripAnsi(got))
-	}
-}
-
-// --- dispatch tests ---
-
+// renderAt is shared with smoketest for end-to-end render checks.
 func renderAt(t *testing.T, width int) string {
 	t.Helper()
 	deps := &Dependencies{
@@ -581,20 +552,57 @@ func renderAt(t *testing.T, width int) string {
 	return s.Render(data)
 }
 
+func TestRenderNarrow_AllChipsPresentAtBudget46(t *testing.T) {
+	// Direct renderNarrow call at budget=46 (the effective width
+	// produced by termWidth=50 with default 2+2 spacers). All four
+	// chips should be present, output should hit exactly 46 cells,
+	// and the context body should contain quintile blocks.
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	if er, ok := s.deps.EnvReader.(*MockEnvReader); ok {
+		er.vars["AWS_PROFILE"] = "staging"
+	}
+	data := &CachedData{
+		CurrentDir:     "/tmp/x",
+		UsedPercentage: 25,
+		GitBranch:      "main",
+	}
+	got := s.renderNarrow(data, 46)
+	if w := runewidth.StringWidth(stripAnsi(got)); w != 46 {
+		t.Errorf("renderNarrow(46) visible width = %d, want 46", w)
+	}
+	stripped := stripAnsi(got)
+	if !strings.Contains(stripped, LeftCurve) {
+		t.Errorf("output missing LeftCurve")
+	}
+	if !strings.Contains(stripped, RightCurve) {
+		t.Errorf("output missing RightCurve")
+	}
+	if !strings.Contains(stripped, "▰") {
+		t.Errorf("output missing quintile block (filled) — context chip not rendering blocks")
+	}
+	if !strings.Contains(stripped, "▱") {
+		t.Errorf("output missing quintile block (empty) — context chip not rendering blocks")
+	}
+}
+
+// --- Dispatch boundary tests ---
+
 // isNarrowOutput uses a structural signal to distinguish narrow from
 // wide rendering: narrow mode emits exactly ONE LeftCurve (the chain
 // start cap); wide mode emits multiple (one for the left section,
 // another wrapping the context bar in the middle).
 func isNarrowOutput(s string) bool {
-	stripped := stripAnsi(s)
-	return stringsCount(stripped, LeftCurve) == 1
+	return strings.Count(stripAnsi(s), LeftCurve) == 1
 }
 
 func TestStatuslineRender_DispatchesToNarrowAtWidth50(t *testing.T) {
 	got := renderAt(t, 50)
 	if !isNarrowOutput(got) {
-		t.Errorf("Render at width=50 should use narrow mode (1 LeftCurve), got %d LeftCurves; stripped=%q",
-			stringsCount(stripAnsi(got), LeftCurve), stripAnsi(got))
+		t.Errorf(
+			"Render at width=50 should use narrow mode (1 LeftCurve), got %d LeftCurves; stripped=%q",
+			strings.Count(stripAnsi(got), LeftCurve),
+			stripAnsi(got),
+		)
 	}
 }
 
@@ -602,15 +610,17 @@ func TestStatuslineRender_DispatchesAtExactlyThreshold80(t *testing.T) {
 	got := renderAt(t, 80)
 	if !isNarrowOutput(got) {
 		t.Errorf("Render at width=80 (≤threshold) should use narrow mode; got %d LeftCurves",
-			stringsCount(stripAnsi(got), LeftCurve))
+			strings.Count(stripAnsi(got), LeftCurve))
 	}
 }
 
 func TestStatuslineRender_DispatchesToWideAt81(t *testing.T) {
 	got := renderAt(t, 81)
 	if isNarrowOutput(got) {
-		t.Errorf("Render at width=81 (>threshold) should use wide mode; got narrow-style 1-LeftCurve output: %q",
-			stripAnsi(got))
+		t.Errorf(
+			"Render at width=81 (>threshold) should use wide mode; got narrow-style output: %q",
+			stripAnsi(got),
+		)
 	}
 }
 
@@ -625,45 +635,29 @@ func TestStatuslineRender_DispatchesToWideAt200(t *testing.T) {
 	}
 }
 
-// --- helpers ---
+// --- Defense-in-depth: every palette key reachable by narrow chips
+// must resolve to non-empty BG and FG escapes (S2).
 
-func contains(haystack, needle string) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
+func TestNarrowChipColorsRoundTrip(t *testing.T) {
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	keys := []string{
+		"lavender", "pink", "peach", "teal", "green", "yellow", "red",
+		"maroon", "sapphire", "mauve",
+	}
+	for _, k := range keys {
+		bg := s.getColorBG(k)
+		fg := s.getColorFG(k)
+		if bg == "" {
+			t.Errorf("getColorBG(%q) returned empty escape; chip would render with previous bg", k)
+		}
+		if fg == "" {
+			t.Errorf(
+				"getColorFG(%q) returned empty escape; curve/chevron would render uncolored",
+				k,
+			)
+		}
+		if bg == fg {
+			t.Errorf("getColorBG(%q) == getColorFG(%q); BG and FG should differ", k, k)
 		}
 	}
-	return false
-}
-
-func stringsCount(haystack, needle string) int {
-	if needle == "" {
-		return 0
-	}
-	count := 0
-	i := 0
-	for i+len(needle) <= len(haystack) {
-		if haystack[i:i+len(needle)] == needle {
-			count++
-			i += len(needle)
-		} else {
-			i++
-		}
-	}
-	return count
-}
-
-func startsWith(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
-}
-
-func endsWith(s, suffix string) bool {
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
-}
-
-func tail(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[len(s)-n:]
 }
