@@ -12,6 +12,15 @@ import (
 	"golang.org/x/term"
 )
 
+// Width cache shared with the widthdaemon. These are vars (not
+// const) so tests can override them without an interface seam.
+//
+//nolint:gochecknoglobals // intentional test seam; never written outside tests
+var (
+	widthCacheFile       = "/dev/shm/cc-tools/parent-width"
+	widthCacheStaleAfter = 5 * time.Minute
+)
+
 // DefaultTerminalWidth provides terminal width detection.
 type DefaultTerminalWidth struct{}
 
@@ -28,6 +37,7 @@ func (t *DefaultTerminalWidth) GetWidth() int {
 		t.getFromTTY,
 		t.getSSHWidth,
 		t.getFromAncestorTTY,
+		t.getWidthCache,
 		getTputWidth,
 		getSttyWidth,
 	}
@@ -107,6 +117,40 @@ func (t *DefaultTerminalWidth) getTestOverride() int {
 		}
 	}
 	return 0
+}
+
+// getWidthCache reads /dev/shm/cc-tools/parent-width, which the
+// widthdaemon updates on every detected change. Returns 0 when:
+//   - the file doesn't exist (daemon not running)
+//   - the file mtime is older than widthCacheStaleAfter (daemon dead)
+//   - the contents don't parse as a positive integer
+//
+// Positioned in the priority list after the real TTY methods so a
+// process that *does* have a TTY uses its own size; the cache is only
+// the source of truth for the headless dispatched-agent case.
+func (t *DefaultTerminalWidth) getWidthCache() int {
+	info, err := os.Stat(widthCacheFile)
+	if err != nil {
+		return 0
+	}
+	if time.Since(info.ModTime()) > widthCacheStaleAfter {
+		if os.Getenv("DEBUG_WIDTH") == "1" {
+			fmt.Fprintf(os.Stderr, "Cache stale (mtime=%s): ignoring\n", info.ModTime())
+		}
+		return 0
+	}
+	data, err := os.ReadFile(widthCacheFile)
+	if err != nil {
+		return 0
+	}
+	width, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || width <= 0 {
+		return 0
+	}
+	if os.Getenv("DEBUG_WIDTH") == "1" {
+		fmt.Fprintf(os.Stderr, "Using cache width: %d\n", width)
+	}
+	return width
 }
 
 func (t *DefaultTerminalWidth) getSSHWidth() int {
