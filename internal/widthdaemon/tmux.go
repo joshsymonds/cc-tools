@@ -108,7 +108,7 @@ func (t *TmuxSource) Detect(ctx context.Context) ([]Source, error) {
 			continue
 		}
 		sources = append(sources, Source{
-			Kind:    "tmux",
+			Kind:    SourceKindTmux,
 			TTY:     parts[0],
 			Width:   width,
 			Session: parts[2],

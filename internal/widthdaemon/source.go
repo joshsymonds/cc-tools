@@ -5,6 +5,14 @@
 // available.
 package widthdaemon
 
+// Source kinds. Used by Aggregate to know which entries to prefer
+// (tmux is authoritative for any PTY it owns) and emitted into the
+// debugging widths.json so a human can see where a number came from.
+const (
+	SourceKindTmux = "tmux"
+	SourceKindTTY  = "tty"
+)
+
 // Source is one detected terminal width observation. The daemon
 // aggregates a slice of these into the canonical cached width.
 //

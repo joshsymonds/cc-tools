@@ -128,7 +128,7 @@ func (u *UtmpSource) Detect(ctx context.Context) ([]Source, error) {
 		if cols == 0 {
 			continue
 		}
-		sources = append(sources, Source{Kind: "tty", TTY: device, Width: int(cols)})
+		sources = append(sources, Source{Kind: SourceKindTTY, TTY: device, Width: int(cols)})
 	}
 	return sources, nil
 }
