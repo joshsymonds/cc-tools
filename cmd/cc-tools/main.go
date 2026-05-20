@@ -49,6 +49,8 @@ func main() {
 		runRenderCloudsCommand()
 	case "width-daemon":
 		runWidthDaemonCommand()
+	case "subagent-statusline":
+		runSubagentStatuslineCommand()
 	case "version":
 		// Print version to stdout as intended output
 		out.Raw(fmt.Sprintf("cc-tools %s\n", version))
@@ -75,6 +77,7 @@ Commands:
   resolve       Look up alias label + env for a host/aws/k8s/gcloud value
   render-clouds Emit AWS/gcloud/k8s chip chain as ANSI (for starship)
   width-daemon  Run the terminal-width detection daemon for headless agents
+  subagent-statusline  Render per-row chip decorations for the claude agents view
   version       Print version information
   help          Show this help message
 
@@ -84,6 +87,7 @@ Examples:
   cc-tools mcp enable jira
   cc-tools resolve --type=k8s --raw="arn:aws:eks:us-east-1:123:cluster/prod"
   cc-tools width-daemon --active-interval=1s --idle-interval=5s
+  echo '{"columns":80,"tasks":[...]}' | cc-tools subagent-statusline
 `)
 }
 
