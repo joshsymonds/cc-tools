@@ -1,9 +1,16 @@
 package subagentstatusline
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// mapEnvReader is a tiny EnvReader stub for tests.
+type mapEnvReader map[string]string
+
+func (m mapEnvReader) Get(key string) string { return m[key] }
 
 func TestRenderDirectoryChip_EmptyCWD(t *testing.T) {
 	got := renderDirectoryChip("")
@@ -219,5 +226,213 @@ func TestColor_FGBG_Roundtrip(t *testing.T) {
 		if c.FG() == c.BG() {
 			t.Errorf("%v FG and BG should differ", c)
 		}
+	}
+}
+
+// writeFakeGitHEAD creates a temp dir with .git/HEAD content for branch tests.
+func writeFakeGitHEAD(t *testing.T, headContent string) string {
+	t.Helper()
+	dir := t.TempDir()
+	gitDir := filepath.Join(dir, ".git")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte(headContent), 0o600); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	return dir
+}
+
+func TestRenderBranchChip_OnBranch(t *testing.T) {
+	cwd := writeFakeGitHEAD(t, "ref: refs/heads/main\n")
+	got, ok := renderBranchChip(cwd)
+	if !ok {
+		t.Fatalf("expected chip, got !ok")
+	}
+	if !strings.Contains(got.Body, "main") {
+		t.Errorf("Body should contain 'main', got %q", got.Body)
+	}
+	if got.Color != ColorPink {
+		t.Errorf("color = %v, want ColorPink", got.Color)
+	}
+}
+
+func TestRenderBranchChip_DetachedHEAD(t *testing.T) {
+	cwd := writeFakeGitHEAD(t, "abc123def456789012345678901234567890abcd\n")
+	got, ok := renderBranchChip(cwd)
+	if !ok {
+		t.Fatalf("expected chip, got !ok")
+	}
+	// Body should contain the 8-char short SHA.
+	if !strings.Contains(got.Body, "abc123de") {
+		t.Errorf("Body should contain 'abc123de' (short SHA), got %q", got.Body)
+	}
+	// Full SHA should NOT appear.
+	if strings.Contains(got.Body, "abc123def456") {
+		t.Errorf("Body should NOT contain full SHA, got %q", got.Body)
+	}
+}
+
+func TestRenderBranchChip_NoGitHEAD(t *testing.T) {
+	cwd := t.TempDir() // no .git
+	_, ok := renderBranchChip(cwd)
+	if ok {
+		t.Errorf("expected !ok for cwd with no .git, got ok")
+	}
+}
+
+func TestRenderBranchChip_GitIsFile(t *testing.T) {
+	// Worktree-style: .git is a file pointing to the real gitdir.
+	// We don't parse it — treat as no chip.
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, ".git"), []byte("gitdir: /elsewhere\n"), 0o600); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+	_, ok := renderBranchChip(cwd)
+	if ok {
+		t.Errorf("expected !ok for .git as file, got ok")
+	}
+}
+
+func TestRenderBranchChip_EmptyCWD(t *testing.T) {
+	_, ok := renderBranchChip("")
+	if ok {
+		t.Errorf("expected !ok for empty cwd, got ok")
+	}
+}
+
+func TestRenderBranchChip_TrailingWhitespace(t *testing.T) {
+	cwd := writeFakeGitHEAD(t, "ref: refs/heads/main\n\n  ")
+	got, ok := renderBranchChip(cwd)
+	if !ok {
+		t.Fatalf("expected chip, got !ok")
+	}
+	if !strings.Contains(got.Body, "main") {
+		t.Errorf("Body should contain 'main' (whitespace trimmed), got %q", got.Body)
+	}
+}
+
+func TestRenderBranchChip_BranchWithSlashes(t *testing.T) {
+	cwd := writeFakeGitHEAD(t, "ref: refs/heads/feature/long-name\n")
+	got, ok := renderBranchChip(cwd)
+	if !ok {
+		t.Fatalf("expected chip, got !ok")
+	}
+	if !strings.Contains(got.Body, "feature/long-name") {
+		t.Errorf("Body should preserve slashed branch name, got %q", got.Body)
+	}
+}
+
+func TestRenderAWSChip_Unset(t *testing.T) {
+	_, ok := renderAWSChip(mapEnvReader{})
+	if ok {
+		t.Errorf("expected !ok for unset AWS_PROFILE, got ok")
+	}
+}
+
+func TestRenderAWSChip_Empty(t *testing.T) {
+	_, ok := renderAWSChip(mapEnvReader{"AWS_PROFILE": ""})
+	if ok {
+		t.Errorf("expected !ok for empty AWS_PROFILE, got ok")
+	}
+}
+
+func TestRenderAWSChip_ProdLowercase(t *testing.T) {
+	got, ok := renderAWSChip(mapEnvReader{"AWS_PROFILE": "prod-account"})
+	if !ok {
+		t.Fatalf("expected chip, got !ok")
+	}
+	if got.Color != ColorPeach {
+		t.Errorf("'prod-account' color = %v, want ColorPeach", got.Color)
+	}
+	if !strings.Contains(got.Body, "prod-account") {
+		t.Errorf("Body should contain profile, got %q", got.Body)
+	}
+}
+
+func TestRenderAWSChip_ProdUppercase(t *testing.T) {
+	got, _ := renderAWSChip(mapEnvReader{"AWS_PROFILE": "PRODUCTION"})
+	if got.Color != ColorPeach {
+		t.Errorf("PRODUCTION color = %v, want ColorPeach (case-insensitive 'prod')", got.Color)
+	}
+}
+
+func TestRenderAWSChip_NonProd(t *testing.T) {
+	got, _ := renderAWSChip(mapEnvReader{"AWS_PROFILE": "staging"})
+	if got.Color != ColorTeal {
+		t.Errorf("staging color = %v, want ColorTeal", got.Color)
+	}
+}
+
+func TestRenderAWSChip_SubstringProd(t *testing.T) {
+	got, _ := renderAWSChip(mapEnvReader{"AWS_PROFILE": "my-dev-prod"})
+	if got.Color != ColorPeach {
+		t.Errorf("'my-dev-prod' color = %v, want ColorPeach (contains 'prod')", got.Color)
+	}
+}
+
+func TestRenderGCloudChip_BothUnset(t *testing.T) {
+	_, ok := renderGCloudChip(mapEnvReader{})
+	if ok {
+		t.Errorf("expected !ok for both gcloud env vars unset")
+	}
+}
+
+func TestRenderGCloudChip_CloudSDKWins(t *testing.T) {
+	got, ok := renderGCloudChip(mapEnvReader{
+		"CLOUDSDK_CORE_PROJECT": "primary",
+		"GOOGLE_CLOUD_PROJECT":  "fallback",
+	})
+	if !ok {
+		t.Fatalf("expected chip, got !ok")
+	}
+	if !strings.Contains(got.Body, "primary") {
+		t.Errorf("Body should prefer CLOUDSDK_CORE_PROJECT, got %q", got.Body)
+	}
+	if strings.Contains(got.Body, "fallback") {
+		t.Errorf("Body should NOT contain fallback value when CLOUDSDK is set, got %q", got.Body)
+	}
+	if got.Color != ColorPeach {
+		t.Errorf("color = %v, want ColorPeach", got.Color)
+	}
+}
+
+func TestRenderGCloudChip_GoogleFallback(t *testing.T) {
+	got, ok := renderGCloudChip(mapEnvReader{"GOOGLE_CLOUD_PROJECT": "fallback"})
+	if !ok {
+		t.Fatalf("expected chip, got !ok")
+	}
+	if !strings.Contains(got.Body, "fallback") {
+		t.Errorf("Body should contain GOOGLE_CLOUD_PROJECT value, got %q", got.Body)
+	}
+}
+
+func TestRenderK8sChip_Unset(t *testing.T) {
+	_, ok := renderK8sChip(mapEnvReader{})
+	if ok {
+		t.Errorf("expected !ok for both k8s env vars unset")
+	}
+}
+
+func TestRenderK8sChip_KubeContext(t *testing.T) {
+	got, ok := renderK8sChip(mapEnvReader{"KUBE_CONTEXT": "eks-prod"})
+	if !ok {
+		t.Fatalf("expected chip, got !ok")
+	}
+	if !strings.Contains(got.Body, "eks-prod") {
+		t.Errorf("Body should contain context, got %q", got.Body)
+	}
+	if got.Color != ColorTeal {
+		t.Errorf("color = %v, want ColorTeal", got.Color)
+	}
+}
+
+func TestRenderK8sChip_KubernetesContext(t *testing.T) {
+	got, ok := renderK8sChip(mapEnvReader{"KUBERNETES_CONTEXT": "gke-staging"})
+	if !ok {
+		t.Fatalf("expected chip, got !ok")
+	}
+	if !strings.Contains(got.Body, "gke-staging") {
+		t.Errorf("Body should contain context, got %q", got.Body)
 	}
 }

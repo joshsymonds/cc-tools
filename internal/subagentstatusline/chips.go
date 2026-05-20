@@ -3,10 +3,20 @@ package subagentstatusline
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Veraticus/cc-tools/internal/statusline"
 )
+
+// EnvReader is the small interface every env-driven chip uses. The
+// production wiring plugs in statusline.DefaultEnvReader{} which
+// already overlays the cc-tools state file on top of process env for
+// AWS_PROFILE — meaning a Bash-tool export in a subagent reaches the
+// agent-view's chip via that file rather than via process inheritance.
+type EnvReader interface {
+	Get(key string) string
+}
 
 // Color is a palette entry name. The methods FG()/BG() delegate to
 // the existing CatppuccinMocha palette in internal/statusline/colors.go
@@ -164,4 +174,105 @@ func renderContextChip(tokenCount, contextWindow int) Chip {
 		color = ColorRed
 	}
 	return Chip{Color: color, Body: body}
+}
+
+// shortSHALen is how many hex chars of a commit SHA we display for
+// detached HEADs. 8 is git's default abbreviation length.
+const shortSHALen = 8
+
+// renderBranchChip reads <cwd>/.git/HEAD and returns the branch chip.
+// Returns (Chip{}, false) when there is no readable .git directory
+// (worktree-pointer files where .git is a regular file are tolerated
+// as "no chip" — parsing those pointers is intentionally out of scope).
+//
+// No subprocess fork. Single os.ReadFile syscall per task.
+func renderBranchChip(cwd string) (Chip, bool) {
+	if cwd == "" {
+		return Chip{}, false
+	}
+	gitDir := filepath.Join(cwd, ".git")
+	info, err := os.Stat(gitDir)
+	if err != nil || !info.IsDir() {
+		return Chip{}, false
+	}
+	headPath := filepath.Join(gitDir, "HEAD")
+	//nolint:gosec // cwd-relative HEAD; daemon-side this is the agent's own cwd from the JSON payload
+	raw, err := os.ReadFile(headPath)
+	if err != nil {
+		return Chip{}, false
+	}
+	head := strings.TrimSpace(string(raw))
+	var name string
+	switch {
+	case strings.HasPrefix(head, "ref: refs/heads/"):
+		name = strings.TrimPrefix(head, "ref: refs/heads/")
+	case len(head) >= shortSHALen:
+		name = head[:shortSHALen]
+	default:
+		return Chip{}, false
+	}
+	if name == "" {
+		return Chip{}, false
+	}
+	return Chip{
+		Color: ColorPink,
+		Body:  " " + statusline.GitIcon + name + " ",
+	}, true
+}
+
+// renderAWSChip returns the AWS chip from env. Profile names
+// containing "prod" (case-insensitive) get Peach; everything else
+// gets Teal. Returns (Chip{}, false) when AWS_PROFILE is unset/empty.
+func renderAWSChip(env EnvReader) (Chip, bool) {
+	profile := env.Get("AWS_PROFILE")
+	if profile == "" {
+		return Chip{}, false
+	}
+	color := ColorTeal
+	if strings.Contains(strings.ToLower(profile), "prod") {
+		color = ColorPeach
+	}
+	return Chip{
+		Color: color,
+		Body:  " " + statusline.AwsIcon + profile + " ",
+	}, true
+}
+
+// renderGCloudChip returns the gcloud chip from env. CLOUDSDK_CORE_PROJECT
+// takes precedence over GOOGLE_CLOUD_PROJECT — gcloud itself reads the
+// former when both are set. Returns (Chip{}, false) when neither is set.
+func renderGCloudChip(env EnvReader) (Chip, bool) {
+	project := env.Get("CLOUDSDK_CORE_PROJECT")
+	if project == "" {
+		project = env.Get("GOOGLE_CLOUD_PROJECT")
+	}
+	if project == "" {
+		return Chip{}, false
+	}
+	return Chip{
+		Color: ColorPeach,
+		Body:  " " + statusline.GcloudIcon + project + " ",
+	}, true
+}
+
+// renderK8sChip returns the kubernetes context chip from env. Reads
+// KUBE_CONTEXT first, then KUBERNETES_CONTEXT. Returns (Chip{}, false)
+// when neither is set.
+//
+// Note: the true source of "current kubectl context" is ~/.kube/config
+// under current-context, but parsing YAML adds a dependency we don't
+// otherwise need. If env-driven sourcing proves insufficient in
+// practice, that's the right next step.
+func renderK8sChip(env EnvReader) (Chip, bool) {
+	ctx := env.Get("KUBE_CONTEXT")
+	if ctx == "" {
+		ctx = env.Get("KUBERNETES_CONTEXT")
+	}
+	if ctx == "" {
+		return Chip{}, false
+	}
+	return Chip{
+		Color: ColorTeal,
+		Body:  " " + statusline.K8sIcon + ctx + " ",
+	}, true
 }
