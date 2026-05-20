@@ -69,9 +69,17 @@ in {
         RestartSec = "5s";
 
         # The daemon forks `tmux list-clients`. systemd user services
-        # start with a minimal PATH, so tmux must be made explicit here
-        # or `tmux: executable file not found` floods the journal.
-        Environment = lib.optional (cfg.tmuxPackage != null) "PATH=${lib.makeBinPath [cfg.tmuxPackage]}";
+        # start with a minimal PATH and no XDG_RUNTIME_DIR, so:
+        #   - PATH must include tmux or the binary isn't found
+        #   - XDG_RUNTIME_DIR must point at the user's runtime dir
+        #     because modern tmux puts its socket at
+        #     $XDG_RUNTIME_DIR/tmux-$UID/default rather than the
+        #     legacy /tmp/tmux-$UID/default. Without it, tmux exits
+        #     "no server running" and we miss tmux as a source.
+        # %U is systemd's specifier for the numeric UID.
+        Environment =
+          (lib.optional (cfg.tmuxPackage != null) "PATH=${lib.makeBinPath [cfg.tmuxPackage]}")
+          ++ ["XDG_RUNTIME_DIR=/run/user/%U"];
 
         # Light hardening — the daemon doesn't need much. It reads
         # /var/run/utmp and forks tmux; that's it.
