@@ -1,0 +1,72 @@
+{
+  config,
+  lib,
+  ...
+}: let
+  cfg = config.services.cc-tools-width-daemon;
+in {
+  options.services.cc-tools-width-daemon = {
+    enable = lib.mkEnableOption "cc-tools terminal-width detection daemon (provides /dev/shm/cc-tools/parent-width for headless Claude Code agents)";
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      description = "The cc-tools package providing the `cc-tools` binary.";
+    };
+
+    activeInterval = lib.mkOption {
+      type = lib.types.str;
+      default = "1s";
+      description = "Polling cadence after a recent width change (Go duration string).";
+    };
+
+    idleInterval = lib.mkOption {
+      type = lib.types.str;
+      default = "5s";
+      description = "Polling cadence after idleAfter has elapsed without a change (Go duration string).";
+    };
+
+    idleAfter = lib.mkOption {
+      type = lib.types.str;
+      default = "30s";
+      description = "Time without a change before backing off to idleInterval (Go duration string).";
+    };
+
+    writerDir = lib.mkOption {
+      type = lib.types.str;
+      default = "/dev/shm/cc-tools";
+      description = "Directory where parent-width and widths.json are atomically written.";
+    };
+  };
+
+  config = lib.mkIf cfg.enable {
+    systemd.user.services.cc-tools-width-daemon = {
+      Unit = {
+        Description = "cc-tools terminal-width detection daemon";
+        Documentation = "https://github.com/Veraticus/cc-tools";
+        After = ["default.target"];
+      };
+
+      Service = {
+        ExecStart =
+          "${cfg.package}/bin/cc-tools width-daemon"
+          + " --active-interval=${cfg.activeInterval}"
+          + " --idle-interval=${cfg.idleInterval}"
+          + " --idle-after=${cfg.idleAfter}"
+          + " --writer-dir=${cfg.writerDir}";
+        Restart = "always";
+        RestartSec = "5s";
+
+        # Light hardening — the daemon doesn't need much. It reads
+        # /var/run/utmp and forks tmux; that's it.
+        NoNewPrivileges = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectControlGroups = true;
+        PrivateTmp = false; # daemon writes to /dev/shm, which must be the real one
+        RestrictRealtime = true;
+      };
+
+      Install.WantedBy = ["default.target"];
+    };
+  };
+}
