@@ -89,7 +89,8 @@ func (t *TmuxSource) Detect(ctx context.Context) ([]Source, error) {
 		return nil, nil
 	}
 
-	out, err := t.Runner.Run(ctx, "tmux", "list-clients", "-F", "#{client_tty} #{client_width} #{client_session}")
+	out, err := t.Runner.Run(ctx, "tmux", "list-clients", "-F",
+		"#{client_tty} #{client_width} #{client_session} #{client_activity}")
 	if err != nil {
 		var exitCoder interface{ ExitCode() int }
 		if errors.As(err, &exitCoder) && exitCoder.ExitCode() == tmuxNotRunningExitCode {
@@ -102,16 +103,47 @@ func (t *TmuxSource) Detect(ctx context.Context) ([]Source, error) {
 	t.notRunningUntil = time.Time{}
 
 	logTo := t.logWriter()
+	parsedClients := parseTmuxClients(out, logTo)
+	if len(parsedClients) == 0 {
+		return nil, nil
+	}
 
+	// Pick the single most-recently-active client. tmux's
+	// `client_activity` updates on keyboard / mouse input, so
+	// "highest activity timestamp" is "where the user is currently
+	// typing" — the right width for the headless statusline to
+	// render against. Older clients (e.g. a phone session left
+	// attached for hours) are deliberately ignored.
+	winner := parsedClients[0]
+	for _, p := range parsedClients[1:] {
+		if p.activity > winner.activity {
+			winner = p
+		}
+	}
+	return []Source{winner.src}, nil
+}
+
+// tmuxClient is one line of `tmux list-clients` output after parsing.
+type tmuxClient struct {
+	src      Source
+	activity int64 // Unix epoch seconds; higher = more recent
+}
+
+// parseTmuxClients turns `tmux list-clients -F` output into structs.
+// Malformed lines, lines with unparseable width / activity, and lines
+// with width <= 0 are logged to logTo and skipped — the surviving
+// clients are returned. Never returns nil; returns an empty slice
+// instead so the caller's range loop is unconditional.
+func parseTmuxClients(out []byte, logTo io.Writer) []tmuxClient {
+	const expectedFields = 4
 	lines := bytes.Split(out, []byte("\n"))
-	sources := make([]Source, 0, len(lines))
+	clients := make([]tmuxClient, 0, len(lines))
 	for _, raw := range lines {
 		line := strings.TrimSpace(string(raw))
 		if line == "" {
 			continue
 		}
 		parts := strings.Fields(line)
-		const expectedFields = 3
 		if len(parts) != expectedFields {
 			_, _ = fmt.Fprintf(logTo,
 				"tmux: skipping malformed line %q (got %d fields, want %d)\n",
@@ -126,14 +158,22 @@ func (t *TmuxSource) Detect(ctx context.Context) ([]Source, error) {
 		if width <= 0 {
 			continue
 		}
-		sources = append(sources, Source{
-			Kind:    SourceKindTmux,
-			TTY:     parts[0],
-			Width:   width,
-			Session: parts[2],
+		activity, actErr := strconv.ParseInt(parts[3], 10, 64)
+		if actErr != nil {
+			_, _ = fmt.Fprintf(logTo, "tmux: skipping line with unparseable activity %q: %v\n", line, actErr)
+			continue
+		}
+		clients = append(clients, tmuxClient{
+			src: Source{
+				Kind:    SourceKindTmux,
+				TTY:     parts[0],
+				Width:   width,
+				Session: parts[2],
+			},
+			activity: activity,
 		})
 	}
-	return sources, nil
+	return clients
 }
 
 func (t *TmuxSource) logWriter() io.Writer {
