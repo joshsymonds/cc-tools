@@ -638,6 +638,22 @@ func TestStatuslineRender_DispatchesToWideAt200(t *testing.T) {
 // --- Defense-in-depth: every palette key reachable by narrow chips
 // must resolve to non-empty BG and FG escapes (S2).
 
+func TestComposeNarrowChain_ContrastingChevronForMatchingColors(t *testing.T) {
+	// When two adjacent chips share a bg color (e.g. context=green
+	// next to AWS-dev=green), the default chevron fg equals the bg
+	// and the glyph disappears. The renderer must use the dark
+	// BaseFG instead so the boundary stays legible.
+	s := newTestStatusline(t, newTestResolver(t, ""))
+	chips := []narrowChip{
+		{Color: "green", Body: "0%", Kind: kindContext},
+		{Color: "green", Body: " dev", Kind: kindEnv},
+	}
+	got := s.composeNarrowChain(chips)
+	if !strings.Contains(got, s.colors.BaseFG()) {
+		t.Errorf("same-color adjacent chips should use BaseFG for the chevron fg, got %q", got)
+	}
+}
+
 func TestNarrowChipColorsRoundTrip(t *testing.T) {
 	s := newTestStatusline(t, newTestResolver(t, ""))
 	keys := []string{

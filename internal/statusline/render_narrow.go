@@ -272,7 +272,16 @@ func (s *Statusline) composeNarrowChain(chips []narrowChip) string {
 		if i+1 < len(chips) {
 			next := chips[i+1]
 			sb.WriteString(s.getColorBG(next.Color))
-			sb.WriteString(s.getColorFG(chip.Color))
+			// When adjacent chips share a bg color (e.g. context=green
+			// next to AWS-dev=green), the default chevron fg would
+			// equal the bg and the glyph would disappear, making the
+			// chips visually fuse. Fall back to the dark BaseFG so the
+			// boundary stays legible.
+			if chip.Color == next.Color {
+				sb.WriteString(s.colors.BaseFG())
+			} else {
+				sb.WriteString(s.getColorFG(chip.Color))
+			}
 			if i+1 < pivot {
 				sb.WriteString(LeftChevron)
 			} else {

@@ -155,6 +155,72 @@ type Chip struct {
 	Body string
 }
 
+// renderAgentNameChip builds the leading chip that identifies which
+// subagent this row belongs to. Color is driven by Task.Status so
+// the row's lifecycle reads at a glance: peach=running (warm/active),
+// green=completed, red=failed/killed, yellow=intermediate, lavender
+// for unknown states.
+//
+// Body uses Task.Name when set; when Name is nil/empty, falls back to
+// a short label derived from Task.Type ("agent", "bash", "workflow",
+// "mcp", "teammate", "dream"). The agent-icon (nf-cod-hubot, U+EBA1)
+// prefixes the name to distinguish this chip from the model-icon
+// family used elsewhere.
+func renderAgentNameChip(t Task) Chip {
+	name := ""
+	if t.Name != nil {
+		name = stripControl(*t.Name)
+	}
+	if name == "" {
+		name = agentTypeLabel(t.Type)
+	}
+	return Chip{
+		Color: agentStatusColor(t.Status),
+		Body:  " " + statusline.AgentIcon + name + " ",
+	}
+}
+
+// agentStatusColor maps Task.Status strings to palette entries. The
+// status set comes from Claude 2.1.145 (subagentStatusLine schema):
+// "running", "completed", "failed", "killed", plus intermediate
+// states ("pending", "queued"). Unknown statuses use Lavender as a
+// neutral fallback.
+func agentStatusColor(status string) Color {
+	switch status {
+	case "running":
+		return ColorPeach
+	case "completed":
+		return ColorGreen
+	case "failed", "killed":
+		return ColorRed
+	case "pending", "queued":
+		return ColorYellow
+	default:
+		return ColorLavender
+	}
+}
+
+// agentTypeLabel maps Task.Type to a short fallback label used when
+// Task.Name is null. Type values come from Claude 2.1.145.
+func agentTypeLabel(taskType string) string {
+	switch taskType {
+	case "local_agent":
+		return "agent"
+	case "local_bash":
+		return "bash"
+	case "local_workflow":
+		return "workflow"
+	case "monitor_mcp", "mcp_task":
+		return "mcp"
+	case "in_process_teammate", "remote_agent":
+		return "teammate"
+	case "dream":
+		return "dream"
+	default:
+		return "task"
+	}
+}
+
 // renderDirectoryChip builds the directory chip. The cwd is shortened
 // to ~/<rel> when under $HOME, kept as-is otherwise. Empty cwd falls
 // back to the process's current working directory; if that's also

@@ -12,6 +12,10 @@ const (
 
 	// GitIcon is the icon for git branch display.
 	GitIcon = " "
+	// AgentIcon is the icon for the subagent-name chip (nf-cod-hubot,
+	// U+EBA1). Distinct from ModelIcons (Claude model variants) so a
+	// subagent row reads as "this is an agent" at a glance.
+	AgentIcon = " "
 	// AwsIcon is the icon for AWS profile display.
 	AwsIcon = " "
 	// K8sIcon is the icon for Kubernetes context display.

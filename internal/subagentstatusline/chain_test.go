@@ -181,6 +181,46 @@ func TestBuildContent_WidthPressureKeepsOnlyDirectory(t *testing.T) {
 	}
 }
 
+func TestBuildContent_AgentNameSurvivesPressure(t *testing.T) {
+	// Under extreme width pressure, agent name AND directory should
+	// both remain. Earlier behavior kept only directory; the chain
+	// must now also preserve the agent identity chip.
+	cwd := writeFakeGitHEAD(t, "ref: refs/heads/main\n")
+	name := "auditor"
+	task := Task{ID: "t1", Name: &name, Type: "local_agent", Status: "running", CWD: cwd}
+	snap := EnvSnapshot{AWSProfile: "staging", GCloudProject: "my-project", K8sContext: "my-cluster"}
+
+	got := BuildContent(task, 15, 1_000_000, snap)
+	if !strings.Contains(got, "auditor") {
+		t.Errorf("agent name 'auditor' must survive width pressure, got %q", got)
+	}
+}
+
+func TestBuildContent_AgentNameUsesTypeLabelFallback(t *testing.T) {
+	cwd := t.TempDir()
+	task := Task{ID: "t1", Type: "local_workflow", Status: "running", CWD: cwd}
+	got := BuildContent(task, 200, 1_000_000, EnvSnapshot{})
+	if !strings.Contains(got, "workflow") {
+		t.Errorf("nil Name should fall back to type label 'workflow', got %q", got)
+	}
+}
+
+func TestBuildContent_ContrastingChevronForMatchingColors(t *testing.T) {
+	// When context (low usage → green) and env (AWS dev → could be
+	// configured to green) are adjacent with the same bg color, the
+	// chevron between them must still render visibly. Verify by
+	// composing a chain with two same-color chips and asserting
+	// BaseFG appears as the chevron foreground.
+	chips := []Chip{
+		{Color: ColorGreen, Body: " a "},
+		{Color: ColorGreen, Body: " b "},
+	}
+	got := assembleChain(chips)
+	if !strings.Contains(got, palette.BaseFG()) {
+		t.Errorf("same-color adjacent chips should use BaseFG for chevron, got %q", got)
+	}
+}
+
 func TestBuildContent_DirectoryNeverDropped(t *testing.T) {
 	cwd := t.TempDir()
 	task := Task{ID: "t1", CWD: cwd}

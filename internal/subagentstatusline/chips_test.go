@@ -14,6 +14,93 @@ type mapEnvReader map[string]string
 
 func (m mapEnvReader) Get(key string) string { return m[key] }
 
+// --- Agent name chip tests ---
+
+func ptr(s string) *string { return &s }
+
+func TestRenderAgentNameChip_UsesNameWhenSet(t *testing.T) {
+	task := Task{Name: ptr("auditor"), Type: "local_agent", Status: "running"}
+	chip := renderAgentNameChip(task)
+	if !strings.Contains(chip.Body, "auditor") {
+		t.Errorf("body should contain Name 'auditor', got %q", chip.Body)
+	}
+	if chip.Color != ColorPeach {
+		t.Errorf("running → ColorPeach, got %v", chip.Color)
+	}
+}
+
+func TestRenderAgentNameChip_FallsBackToTypeLabel(t *testing.T) {
+	cases := []struct {
+		taskType string
+		want     string
+	}{
+		{"local_agent", "agent"},
+		{"local_bash", "bash"},
+		{"local_workflow", "workflow"},
+		{"monitor_mcp", "mcp"},
+		{"mcp_task", "mcp"},
+		{"in_process_teammate", "teammate"},
+		{"remote_agent", "teammate"},
+		{"dream", "dream"},
+		{"unknown_type", "task"},
+	}
+	for _, c := range cases {
+		chip := renderAgentNameChip(Task{Type: c.taskType, Status: "running"})
+		if !strings.Contains(chip.Body, c.want) {
+			t.Errorf("Type=%q: body should contain %q, got %q", c.taskType, c.want, chip.Body)
+		}
+	}
+}
+
+func TestRenderAgentNameChip_EmptyNameFallsBackToTypeLabel(t *testing.T) {
+	empty := ""
+	chip := renderAgentNameChip(Task{Name: &empty, Type: "local_workflow", Status: "running"})
+	if !strings.Contains(chip.Body, "workflow") {
+		t.Errorf("empty Name should fall back to type label 'workflow', got %q", chip.Body)
+	}
+}
+
+func TestAgentStatusColor_AllStatuses(t *testing.T) {
+	cases := []struct {
+		status string
+		want   Color
+	}{
+		{"running", ColorPeach},
+		{"completed", ColorGreen},
+		{"failed", ColorRed},
+		{"killed", ColorRed},
+		{"pending", ColorYellow},
+		{"queued", ColorYellow},
+		{"", ColorLavender},
+		{"unrecognized", ColorLavender},
+	}
+	for _, c := range cases {
+		got := agentStatusColor(c.status)
+		if got != c.want {
+			t.Errorf("agentStatusColor(%q) = %v, want %v", c.status, got, c.want)
+		}
+	}
+}
+
+func TestRenderAgentNameChip_StripsControlBytes(t *testing.T) {
+	// A poisoned Name (e.g. via attacker-controlled task creation)
+	// must not inject terminal escapes into the chip body.
+	task := Task{Name: ptr("evil\x1b]0;PWN\x07"), Type: "local_agent", Status: "running"}
+	chip := renderAgentNameChip(task)
+	for _, r := range chip.Body {
+		if r < 0x20 || r == 0x7f {
+			t.Errorf("chip body contains control byte 0x%x: %q", r, chip.Body)
+		}
+	}
+}
+
+func TestRenderAgentNameChip_BodyHasPaddingSpaces(t *testing.T) {
+	chip := renderAgentNameChip(Task{Name: ptr("x"), Type: "local_agent", Status: "running"})
+	if !strings.HasPrefix(chip.Body, " ") || !strings.HasSuffix(chip.Body, " ") {
+		t.Errorf("body should be wrapped with single-space padding, got %q", chip.Body)
+	}
+}
+
 func TestRenderDirectoryChip_EmptyCWD(t *testing.T) {
 	// When cwd is empty, we fall back to the process's working dir.
 	// Body should NOT contain "?" because os.Getwd succeeds in tests.

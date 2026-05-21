@@ -91,7 +91,15 @@ func assembleChain(chips []Chip) string {
 		if i+1 < len(chips) {
 			next := chips[i+1]
 			b.WriteString(next.Color.BG())
-			b.WriteString(chip.Color.FG())
+			// When adjacent chips share a bg color (e.g. context=green
+			// next to AWS-dev=green), the default chevron fg equals
+			// the bg and the glyph disappears, visually fusing the
+			// chips. Fall back to the dark BaseFG for a legible edge.
+			if chip.Color == next.Color {
+				b.WriteString(palette.BaseFG())
+			} else {
+				b.WriteString(chip.Color.FG())
+			}
 			b.WriteString(statusline.LeftChevron)
 			b.WriteString(palette.NC())
 		}
@@ -119,7 +127,10 @@ func BuildContent(task Task, columns, contextWindow int, snap EnvSnapshot) strin
 	}
 
 	// Gather all candidate chips in display order. Each entry is
-	// (chip, isPresent). Branch and the three env chips are optional.
+	// (chip, isPresent). Branch and the three env chips are optional;
+	// the agent-name chip is always synthesized (Name falls back to
+	// a Type-derived label) so a row is never identityless.
+	name := renderAgentNameChip(task)
 	dir := renderDirectoryChip(task.CWD)
 	ctx := renderContextChip(task.TokenCount, contextWindow)
 	branch, branchOK := renderBranchChip(task.CWD)
@@ -133,6 +144,7 @@ func BuildContent(task Task, columns, contextWindow int, snap EnvSnapshot) strin
 		present bool
 	}
 	candidates := []opt{
+		{name, true},       // agent identity — never dropped
 		{dir, true},        // never dropped
 		{ctx, true},        // always rendered (we have tokenCount)
 		{branch, branchOK}, // only if .git/HEAD readable
@@ -150,8 +162,10 @@ func BuildContent(task Task, columns, contextWindow int, snap EnvSnapshot) strin
 	}
 
 	// Width-pressure: drop right-to-left until the chain fits.
-	// Stop at length 1 (directory always remains).
-	for len(present) > 1 {
+	// Stop at length 2 — agent name + directory always remain so a
+	// row never loses its identity or cwd.
+	const minRetainedChips = 2
+	for len(present) > minRetainedChips {
 		if visibleWidth(assembleChain(present)) <= columns-widthMargin {
 			break
 		}
