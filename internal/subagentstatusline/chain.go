@@ -126,11 +126,13 @@ func BuildContent(task Task, columns, contextWindow int, snap EnvSnapshot) strin
 		contextWindow = DefaultContextWindow
 	}
 
-	// Gather all candidate chips in display order. Each entry is
-	// (chip, isPresent). Branch and the three env chips are optional;
-	// the agent-name chip is always synthesized (Name falls back to
-	// a Type-derived label) so a row is never identityless.
+	// Gather all candidate chips. Display order goes:
+	// name → description → dir → context → branch → env chips.
+	// Name and dir are pinned; everything else can drop under width
+	// pressure. Description sits next to name visually but drops
+	// before dir thanks to per-chip droppable flags.
 	name := renderAgentNameChip(task)
+	desc, descOK := renderAgentDescriptionChip(task)
 	dir := renderDirectoryChip(task.CWD)
 	ctx := renderContextChip(task.TokenCount, contextWindow)
 	branch, branchOK := renderBranchChip(task.CWD)
@@ -138,39 +140,67 @@ func BuildContent(task Task, columns, contextWindow int, snap EnvSnapshot) strin
 	gcloud, gcloudOK := renderGCloudChip(snap.GCloudProject)
 	k8s, k8sOK := renderK8sChip(snap.K8sContext)
 
-	// Assemble candidate chip list in display order.
-	type opt struct {
-		chip    Chip
-		present bool
-	}
-	candidates := []opt{
-		{name, true},       // agent identity — never dropped
-		{dir, true},        // never dropped
-		{ctx, true},        // always rendered (we have tokenCount)
-		{branch, branchOK}, // only if .git/HEAD readable
-		{aws, awsOK},
-		{gcloud, gcloudOK},
-		{k8s, k8sOK},
+	candidates := []chipOpt{
+		{name, true, false},  // identity — pinned
+		{desc, descOK, true}, // sits next to name, drops first under pressure
+		{dir, true, false},   // cwd — pinned
+		{ctx, true, true},    // always present, droppable
+		{branch, branchOK, true},
+		{aws, awsOK, true},
+		{gcloud, gcloudOK, true},
+		{k8s, k8sOK, true},
 	}
 
-	// Filter out the absent ones first.
-	present := make([]Chip, 0, len(candidates))
+	present := make([]chipOpt, 0, len(candidates))
 	for _, c := range candidates {
 		if c.present {
-			present = append(present, c.chip)
+			present = append(present, c)
 		}
 	}
 
-	// Width-pressure: drop right-to-left until the chain fits.
-	// Stop at length 2 — agent name + directory always remain so a
-	// row never loses its identity or cwd.
-	const minRetainedChips = 2
-	for len(present) > minRetainedChips {
-		if visibleWidth(assembleChain(present)) <= columns-widthMargin {
+	// Width-pressure: drop the rightmost DROPPABLE chip until the
+	// chain fits. Pinned chips (name, dir) stay where they are
+	// regardless. Loop terminates when nothing droppable remains.
+	for {
+		chips := chipsOf(present)
+		if visibleWidth(assembleChain(chips)) <= columns-widthMargin {
 			break
 		}
-		present = present[:len(present)-1]
+		idx := lastDroppableIndex(present)
+		if idx < 0 {
+			break
+		}
+		present = append(present[:idx], present[idx+1:]...)
 	}
 
-	return assembleChain(present)
+	return assembleChain(chipsOf(present))
+}
+
+// chipOpt is one candidate chip slot. droppable=false marks chips
+// that survive width pressure (name, dir); droppable=true chips drop
+// right-to-left until the chain fits.
+type chipOpt struct {
+	chip      Chip
+	present   bool
+	droppable bool
+}
+
+// chipsOf extracts the Chip values from candidates in display order.
+func chipsOf(opts []chipOpt) []Chip {
+	out := make([]Chip, 0, len(opts))
+	for _, o := range opts {
+		out = append(out, o.chip)
+	}
+	return out
+}
+
+// lastDroppableIndex returns the index of the rightmost droppable
+// chip, or -1 if every remaining chip is pinned.
+func lastDroppableIndex(opts []chipOpt) int {
+	for i := len(opts) - 1; i >= 0; i-- {
+		if opts[i].droppable {
+			return i
+		}
+	}
+	return -1
 }

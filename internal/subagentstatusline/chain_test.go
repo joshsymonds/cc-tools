@@ -181,6 +181,57 @@ func TestBuildContent_WidthPressureKeepsOnlyDirectory(t *testing.T) {
 	}
 }
 
+func TestBuildContent_DescriptionAdjacentToName_WideTerminal(t *testing.T) {
+	// At wide widths, both name AND description chips render and
+	// description appears immediately after name (before dir).
+	cwd := t.TempDir()
+	name := "auditor"
+	task := Task{
+		ID:          "t1",
+		Name:        &name,
+		Type:        "local_agent",
+		Status:      "running",
+		Description: "Reviewing config",
+		CWD:         cwd,
+	}
+	got := BuildContent(task, 200, 1_000_000, EnvSnapshot{})
+	idxName := strings.Index(got, "auditor")
+	idxDesc := strings.Index(got, "Reviewing config")
+	idxDir := strings.Index(got, cwd) // dir chip contains the CWD path
+	if idxName < 0 || idxDesc < 0 || idxDir < 0 {
+		t.Fatalf("expected all three chips in output, got %q", got)
+	}
+	if idxName >= idxDesc || idxDesc >= idxDir {
+		t.Errorf("display order should be name → description → dir; got name@%d desc@%d dir@%d",
+			idxName, idxDesc, idxDir)
+	}
+}
+
+func TestBuildContent_DescriptionDropsBeforeDir(t *testing.T) {
+	// Under tight width pressure, the description chip drops while
+	// the dir chip is preserved.
+	cwd := t.TempDir()
+	name := "auditor"
+	task := Task{
+		ID:          "t1",
+		Name:        &name,
+		Type:        "local_agent",
+		Status:      "running",
+		Description: "A reasonably long description that costs cells",
+		CWD:         cwd,
+	}
+	got := BuildContent(task, 25, 1_000_000, EnvSnapshot{})
+	if strings.Contains(got, "reasonably long") {
+		t.Errorf("description should drop under tight width; got %q", got)
+	}
+	if !strings.Contains(got, "auditor") {
+		t.Errorf("agent name should survive width pressure; got %q", got)
+	}
+	if !strings.Contains(got, statusline.RightCurve) {
+		t.Errorf("chain should still close with RightCurve; got %q", got)
+	}
+}
+
 func TestBuildContent_AgentNameSurvivesPressure(t *testing.T) {
 	// Under extreme width pressure, agent name AND directory should
 	// both remain. Earlier behavior kept only directory; the chain

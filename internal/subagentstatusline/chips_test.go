@@ -94,6 +94,103 @@ func TestRenderAgentNameChip_StripsControlBytes(t *testing.T) {
 	}
 }
 
+// --- Agent description chip tests ---
+
+func TestRenderAgentDescriptionChip_WhenNameAndDescriptionDiffer(t *testing.T) {
+	task := Task{
+		Name:        ptr("auditor"),
+		Type:        "local_agent",
+		Description: "Reviewing config",
+		Status:      "running",
+	}
+	chip, ok := renderAgentDescriptionChip(task)
+	if !ok {
+		t.Fatalf("description chip should render when Description differs from Name")
+	}
+	if !strings.Contains(chip.Body, "Reviewing config") {
+		t.Errorf("body should contain Description, got %q", chip.Body)
+	}
+	if chip.Color != ColorSapphire {
+		t.Errorf("description chip color = %v, want ColorSapphire", chip.Color)
+	}
+}
+
+func TestRenderAgentDescriptionChip_SkipsWhenSameAsName(t *testing.T) {
+	// Common Task-tool case: Name nil, Label = Description, so the
+	// name chip already shows Description. Description chip would
+	// duplicate it.
+	task := Task{
+		Type:        "local_agent",
+		Label:       "Audit code",
+		Description: "Audit code",
+		Status:      "running",
+	}
+	if _, ok := renderAgentDescriptionChip(task); ok {
+		t.Errorf("description chip should be omitted when text matches the name chip")
+	}
+}
+
+func TestRenderAgentDescriptionChip_FallsBackToLabel(t *testing.T) {
+	// Description empty but Label set → use Label as the secondary
+	// text (still useful info).
+	task := Task{
+		Name:   ptr("auditor"),
+		Type:   "local_agent",
+		Label:  "Short label",
+		Status: "running",
+	}
+	chip, ok := renderAgentDescriptionChip(task)
+	if !ok {
+		t.Fatalf("description chip should render with Label fallback")
+	}
+	if !strings.Contains(chip.Body, "Short label") {
+		t.Errorf("body should contain Label fallback, got %q", chip.Body)
+	}
+}
+
+func TestRenderAgentDescriptionChip_SkipsWhenEmpty(t *testing.T) {
+	task := Task{Name: ptr("auditor"), Type: "local_agent", Status: "running"}
+	if _, ok := renderAgentDescriptionChip(task); ok {
+		t.Errorf("description chip should be omitted when both Description and Label are empty")
+	}
+}
+
+func TestRenderAgentDescriptionChip_TruncatesLongText(t *testing.T) {
+	long := strings.Repeat("x", 50)
+	task := Task{
+		Name:        ptr("auditor"),
+		Type:        "local_agent",
+		Description: long,
+		Status:      "running",
+	}
+	chip, _ := renderAgentDescriptionChip(task)
+	// Body includes padding (" " + text + " "). Strip the padding
+	// for the rune count comparison.
+	body := strings.TrimSpace(chip.Body)
+	if len([]rune(body)) > descriptionMaxRunes {
+		t.Errorf("description text not truncated: %d runes (max %d), body=%q",
+			len([]rune(body)), descriptionMaxRunes, body)
+	}
+	if !strings.HasSuffix(body, "…") {
+		t.Errorf("truncated description should end with ellipsis, got %q", body)
+	}
+}
+
+func TestRenderAgentDescriptionChip_StripsControlBytes(t *testing.T) {
+	task := Task{
+		Name:        ptr("auditor"),
+		Type:        "local_agent",
+		Description: "evil\x1b]0;PWN\x07",
+		Status:      "running",
+	}
+	chip, _ := renderAgentDescriptionChip(task)
+	for _, r := range chip.Body {
+		if r < 0x20 || r == 0x7f {
+			t.Errorf("description chip body contains control byte 0x%x: %q", r, chip.Body)
+		}
+	}
+}
+
 func TestRenderAgentNameChip_BodyHasPaddingSpaces(t *testing.T) {
 	chip := renderAgentNameChip(Task{Name: ptr("x"), Type: "local_agent", Status: "running"})
 	if !strings.HasPrefix(chip.Body, " ") || !strings.HasSuffix(chip.Body, " ") {

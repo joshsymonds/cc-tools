@@ -89,6 +89,11 @@ const (
 	ColorRed      Color = "red"
 	ColorPink     Color = "pink"
 	ColorTeal     Color = "teal"
+	// ColorSapphire is reserved for the description chip — a cool
+	// blue that reads as "info" against the warm peach name chip
+	// without colliding with dir (lavender), branch (pink), or any
+	// env-chip color.
+	ColorSapphire Color = "sapphire"
 )
 
 // chip text uses the dark base foreground so the colored bg stays
@@ -114,6 +119,8 @@ func (c Color) BG() string {
 		return palette.PinkBG()
 	case ColorTeal:
 		return palette.TealBG()
+	case ColorSapphire:
+		return palette.SapphireBG()
 	}
 	return ""
 }
@@ -137,6 +144,8 @@ func (c Color) FG() string {
 		return palette.PinkFG()
 	case ColorTeal:
 		return palette.TealFG()
+	case ColorSapphire:
+		return palette.SapphireFG()
 	}
 	return ""
 }
@@ -161,23 +170,114 @@ type Chip struct {
 // green=completed, red=failed/killed, yellow=intermediate, lavender
 // for unknown states.
 //
-// Body uses Task.Name when set; when Name is nil/empty, falls back to
-// a short label derived from Task.Type ("agent", "bash", "workflow",
-// "mcp", "teammate", "dream"). The agent-icon (nf-cod-hubot, U+EBA1)
-// prefixes the name to distinguish this chip from the model-icon
-// family used elsewhere.
+// Body uses the best identifier available via agentNameText (Name →
+// Label → Description → type fallback), prefixed with AgentIcon
+// (nf-cod-hubot, U+EBA1) to distinguish from the model-icon family.
 func renderAgentNameChip(t Task) Chip {
-	name := ""
-	if t.Name != nil {
-		name = stripControl(*t.Name)
-	}
-	if name == "" {
-		name = agentTypeLabel(t.Type)
-	}
 	return Chip{
 		Color: agentStatusColor(t.Status),
-		Body:  " " + statusline.AgentIcon + name + " ",
+		Body:  " " + statusline.AgentIcon + agentNameText(t) + " ",
 	}
+}
+
+// agentNameMaxRunes caps the chip body's identifier portion. Most
+// Claude-pre-computed labels are short prose ("Audit code", "Run
+// tests") and fit; long Descriptions get truncated with "…". 20
+// runes balances readability against horizontal budget.
+const agentNameMaxRunes = 20
+
+// nameSource records which Task field the name chip's text came
+// from. Used downstream by renderAgentDescriptionChip to avoid
+// rendering a second chip that just repeats the same source under
+// a different truncation.
+type nameSource int
+
+const (
+	sourceTypeLabel   nameSource = iota // type-derived fallback ("agent")
+	sourceName                          // Task.Name
+	sourceLabel                         // Task.Label
+	sourceDescription                   // Task.Description
+)
+
+// agentNameText returns the truncated text for the name chip. See
+// agentNamePicked for the source priority.
+func agentNameText(t Task) string {
+	text, _ := agentNamePicked(t)
+	return text
+}
+
+// agentNamePicked picks the most informative identifier and reports
+// which Task field it came from. Priority:
+//  1. Task.Name (user-assigned, e.g. via `/agents` UI)
+//  2. Task.Label (Claude's pre-computed short label — matches the
+//     agents-view header text)
+//  3. Task.Description (the agent's current prompt/summary)
+//  4. agentTypeLabel(Type) as a final fallback
+//
+// Every source is run through stripControl to neutralize ANSI
+// injection from poisoned Name/Label/Description values.
+func agentNamePicked(t Task) (string, nameSource) {
+	if t.Name != nil {
+		if s := strings.TrimSpace(stripControl(*t.Name)); s != "" {
+			return truncateRunes(s, agentNameMaxRunes), sourceName
+		}
+	}
+	if s := strings.TrimSpace(stripControl(t.Label)); s != "" {
+		return truncateRunes(s, agentNameMaxRunes), sourceLabel
+	}
+	if s := strings.TrimSpace(stripControl(t.Description)); s != "" {
+		return truncateRunes(s, agentNameMaxRunes), sourceDescription
+	}
+	return agentTypeLabel(t.Type), sourceTypeLabel
+}
+
+// descriptionMaxRunes caps the description chip's text. Wider than
+// the name cap because descriptions are usually full sentences
+// ("Audit security findings", "Run integration tests against …").
+const descriptionMaxRunes = 28
+
+// renderAgentDescriptionChip builds the secondary chip that conveys
+// what the agent is currently doing. Returns (Chip{}, false) when:
+//   - the name chip is already showing Label or Description (so a
+//     second chip would just repeat the same source under a
+//     different truncation — common Task-tool case);
+//   - no Label and no Description are set.
+//
+// Color is ColorSapphire — a cool blue that contrasts with the
+// status-colored name chip beside it and with the lavender dir chip
+// that follows.
+func renderAgentDescriptionChip(t Task) (Chip, bool) {
+	_, src := agentNamePicked(t)
+	// If the name chip is already showing Label or Description text,
+	// don't render a redundant chip beside it.
+	if src == sourceLabel || src == sourceDescription {
+		return Chip{}, false
+	}
+	// Prefer Description (full text), fall back to Label.
+	text := strings.TrimSpace(stripControl(t.Description))
+	if text == "" {
+		text = strings.TrimSpace(stripControl(t.Label))
+	}
+	if text == "" {
+		return Chip{}, false
+	}
+	return Chip{
+		Color: ColorSapphire,
+		Body:  " " + truncateRunes(text, descriptionMaxRunes) + " ",
+	}, true
+}
+
+// truncateRunes returns s if its rune count is ≤ max, otherwise the
+// first (max-1) runes followed by "…". Uses rune count (not byte
+// length or display width) because agent labels are typically ASCII
+// prose where rune count tracks visual width closely enough; a
+// dedicated runewidth dependency isn't worth it for this one site.
+func truncateRunes(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }
 
 // agentStatusColor maps Task.Status strings to palette entries. The
