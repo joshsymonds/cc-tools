@@ -28,9 +28,9 @@ func main() {
 
 	// Debug logging — log all invocations to a file. Gated behind the
 	// CC_TOOLS_DEBUG env var so hot-path subcommands (statusline,
-	// subagent-statusline, width-daemon) don't unconditionally touch
-	// disk + grow an unbounded log on every tick. Set CC_TOOLS_DEBUG=1
-	// to capture invocations for diagnosis.
+	// subagent-statusline) don't unconditionally touch disk + grow an
+	// unbounded log on every tick. Set CC_TOOLS_DEBUG=1 to capture
+	// invocations for diagnosis.
 	if os.Getenv("CC_TOOLS_DEBUG") == "1" {
 		debugLog()
 	}
@@ -53,8 +53,6 @@ func main() {
 		runResolveCommand()
 	case "render-clouds":
 		runRenderCloudsCommand()
-	case "width-daemon":
-		runWidthDaemonCommand()
 	case "subagent-statusline":
 		runSubagentStatuslineCommand()
 	case "version":
@@ -82,7 +80,6 @@ Commands:
   config        Manage configuration settings
   resolve       Look up alias label + env for a host/aws/k8s/gcloud value
   render-clouds Emit AWS/gcloud/k8s chip chain as ANSI (for starship)
-  width-daemon  Run the terminal-width detection daemon for headless agents
   subagent-statusline  Render per-row chip decorations for the claude agents view
   version       Print version information
   help          Show this help message
@@ -92,7 +89,6 @@ Examples:
   cc-tools mcp list
   cc-tools mcp enable jira
   cc-tools resolve --type=k8s --raw="arn:aws:eks:us-east-1:123:cluster/prod"
-  cc-tools width-daemon --active-interval=1s --idle-interval=5s
   echo '{"columns":80,"tasks":[...]}' | cc-tools subagent-statusline
 `)
 }

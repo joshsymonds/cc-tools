@@ -6,14 +6,8 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }: {
-    # System-independent outputs. The home-manager module installs a
-    # systemd user service that runs `cc-tools width-daemon`, which
-    # caches terminal widths to /dev/shm/cc-tools/ for headless
-    # Claude Code subagents.
-    homeManagerModules.cc-tools = import ./nix/width-daemon.nix;
-    homeManagerModules.default = import ./nix/width-daemon.nix;
-  } // flake-utils.lib.eachDefaultSystem (system:
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
@@ -137,3 +131,4 @@
       }
     );
 }
+

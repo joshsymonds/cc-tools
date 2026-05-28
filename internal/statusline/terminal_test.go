@@ -1,161 +1,70 @@
 package statusline
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestDefaultTerminalWidth_GetWidth(t *testing.T) {
 	tw := &DefaultTerminalWidth{}
 
-	// Test with various environment setups
 	tests := []struct {
 		name     string
 		setupEnv func(*testing.T)
-		minWidth int
-		maxWidth int
+		want     int
 	}{
 		{
-			name: "with COLUMNS env var",
-			setupEnv: func(t *testing.T) {
-				t.Helper()
-				t.Setenv("COLUMNS", "100")
-			},
-			minWidth: 80, // Could be 100 or fallback
-			maxWidth: 150,
-		},
-		{
-			name: "with CLAUDE_STATUSLINE_WIDTH env var",
+			name: "CLAUDE_STATUSLINE_WIDTH overrides everything",
 			setupEnv: func(t *testing.T) {
 				t.Helper()
 				t.Setenv("CLAUDE_STATUSLINE_WIDTH", "120")
+				t.Setenv("COLUMNS", "80")
 			},
-			minWidth: 120,
-			maxWidth: 120,
+			want: 120,
 		},
 		{
-			name: "no env vars",
-			setupEnv: func(_ *testing.T) {
-				// t.Setenv automatically handles cleanup
+			name: "COLUMNS used when test override absent",
+			setupEnv: func(t *testing.T) {
+				t.Helper()
+				t.Setenv("CLAUDE_STATUSLINE_WIDTH", "")
+				t.Setenv("COLUMNS", "100")
 			},
-			minWidth: 80,   // Default fallback
-			maxWidth: 1000, // Could get from terminal (covers ultrawide displays)
+			want: 100,
+		},
+		{
+			name: "COLUMNS=0 falls through to default",
+			setupEnv: func(t *testing.T) {
+				t.Helper()
+				t.Setenv("CLAUDE_STATUSLINE_WIDTH", "")
+				t.Setenv("COLUMNS", "0")
+			},
+			want: 200,
+		},
+		{
+			name: "garbage COLUMNS falls through to default",
+			setupEnv: func(t *testing.T) {
+				t.Helper()
+				t.Setenv("CLAUDE_STATUSLINE_WIDTH", "")
+				t.Setenv("COLUMNS", "not-a-number")
+			},
+			want: 200,
+		},
+		{
+			name: "no env vars yields default",
+			setupEnv: func(t *testing.T) {
+				t.Helper()
+				t.Setenv("CLAUDE_STATUSLINE_WIDTH", "")
+				t.Setenv("COLUMNS", "")
+			},
+			want: 200,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.setupEnv(t)
-
-			width := tw.GetWidth()
-
-			if width < tt.minWidth || width > tt.maxWidth {
-				t.Errorf("Expected width between %d and %d, got %d",
-					tt.minWidth, tt.maxWidth, width)
+			if got := tw.GetWidth(); got != tt.want {
+				t.Errorf("GetWidth() = %d, want %d", got, tt.want)
 			}
 		})
-	}
-}
-
-// pointWidthCacheAt swaps widthCacheFile to path for the test's
-// lifetime and restores the original via t.Cleanup.
-func pointWidthCacheAt(t *testing.T, path string) {
-	t.Helper()
-	original := widthCacheFile
-	widthCacheFile = path
-	t.Cleanup(func() { widthCacheFile = original })
-}
-
-func TestGetWidthCache_HappyPath(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "parent-width")
-	if err := os.WriteFile(path, []byte("123\n"), 0o600); err != nil {
-		t.Fatalf("write cache: %v", err)
-	}
-	pointWidthCacheAt(t, path)
-
-	tw := &DefaultTerminalWidth{}
-	if got := tw.getWidthCache(); got != 123 {
-		t.Errorf("getWidthCache = %d, want 123", got)
-	}
-}
-
-func TestGetWidthCache_Missing(t *testing.T) {
-	pointWidthCacheAt(t, "/nonexistent/cc-tools/parent-width")
-
-	tw := &DefaultTerminalWidth{}
-	if got := tw.getWidthCache(); got != 0 {
-		t.Errorf("getWidthCache(missing) = %d, want 0", got)
-	}
-}
-
-func TestGetWidthCache_Stale(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "parent-width")
-	if err := os.WriteFile(path, []byte("80\n"), 0o600); err != nil {
-		t.Fatalf("write cache: %v", err)
-	}
-	// Backdate mtime well past the stale window.
-	stale := time.Now().Add(-2 * widthCacheStaleAfter)
-	if err := os.Chtimes(path, stale, stale); err != nil {
-		t.Fatalf("chtimes: %v", err)
-	}
-	pointWidthCacheAt(t, path)
-
-	tw := &DefaultTerminalWidth{}
-	if got := tw.getWidthCache(); got != 0 {
-		t.Errorf("getWidthCache(stale) = %d, want 0", got)
-	}
-}
-
-func TestGetWidthCache_Garbage(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "parent-width")
-	if err := os.WriteFile(path, []byte("not a number\n"), 0o600); err != nil {
-		t.Fatalf("write cache: %v", err)
-	}
-	pointWidthCacheAt(t, path)
-
-	tw := &DefaultTerminalWidth{}
-	if got := tw.getWidthCache(); got != 0 {
-		t.Errorf("getWidthCache(garbage) = %d, want 0", got)
-	}
-}
-
-func TestGetWidthCache_Zero(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "parent-width")
-	if err := os.WriteFile(path, []byte("0\n"), 0o600); err != nil {
-		t.Fatalf("write cache: %v", err)
-	}
-	pointWidthCacheAt(t, path)
-
-	tw := &DefaultTerminalWidth{}
-	if got := tw.getWidthCache(); got != 0 {
-		t.Errorf("getWidthCache(0) = %d, want 0", got)
-	}
-}
-
-func TestGetWidthCache_RejectsSymlink(t *testing.T) {
-	// Defense against /dev/shm squatting: if the cache path is a
-	// symlink, refuse to follow it. An attacker who can write into
-	// the cache dir could otherwise plant a symlink at the canonical
-	// path and redirect statusline reads to arbitrary readable files.
-	dir := t.TempDir()
-	target := filepath.Join(dir, "real-width")
-	if err := os.WriteFile(target, []byte("80\n"), 0o600); err != nil {
-		t.Fatalf("write target: %v", err)
-	}
-	link := filepath.Join(dir, "parent-width")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
-	pointWidthCacheAt(t, link)
-
-	tw := &DefaultTerminalWidth{}
-	if got := tw.getWidthCache(); got != 0 {
-		t.Errorf("getWidthCache(symlink) = %d, want 0 — O_NOFOLLOW should reject", got)
 	}
 }

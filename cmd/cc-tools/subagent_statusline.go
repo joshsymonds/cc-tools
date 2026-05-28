@@ -18,8 +18,7 @@ func runSubagentStatuslineCommand() {
 }
 
 // subagentStatuslineMain is a separate function so its returns happen
-// before the outer os.Exit (gocritic exitAfterDefer pattern, matching
-// width_daemon.go).
+// before the outer os.Exit (gocritic exitAfterDefer pattern).
 func subagentStatuslineMain() int {
 	contextWindow := subagentstatusline.DefaultContextWindow
 	if raw := os.Getenv("CC_TOOLS_SUBAGENT_CONTEXT_WINDOW"); raw != "" {
